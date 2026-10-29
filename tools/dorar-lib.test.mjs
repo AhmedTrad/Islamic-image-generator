@@ -112,8 +112,8 @@ test('builds card entries with ids and references', () => {
   assert.equal(lib.toCardEntry({ ...bukhari, book: 'صحيح الجامع', number: '1/23' }, { cat: 'iman' }).id, 'dorar-a1b2c3d4');
 });
 
-test('reads and writes the hadith-card.html data block', async () => {
-  const html = await readFile(new URL('../hadith-card.html', import.meta.url), 'utf8');
+test('reads and writes the index.html data block', async () => {
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const list = lib.readCardData(html);
   assert.equal(list.length, 21);
   const entry = { id: 'test-1', cat: 'iman', matn: 'نصٌّ فيه </script> و$&', source: 's', refs: 'r', narrator: 'n', sharh: '' };
@@ -124,7 +124,7 @@ test('reads and writes the hadith-card.html data block', async () => {
 });
 
 test('finds duplicates by id, dorar id or text without tashkeel', async () => {
-  const list = lib.readCardData(await readFile(new URL('../hadith-card.html', import.meta.url), 'utf8'));
+  const list = lib.readCardData(await readFile(new URL('../index.html', import.meta.url), 'utf8'));
   assert.equal(lib.findDuplicate(list, { id: 'x', matn: 'إنما الأعمال بالنيات، وإنما لكل امرئ ما نوى، فمن كانت هجرته إلى دنيا يصيبها، أو إلى امرأة ينكحها، فهجرته إلى ما هاجر إليه.' })?.id, 'bukhari-1');
   assert.equal(lib.findDuplicate(list, { id: 'muslim-2594', matn: '' })?.id, 'muslim-2594');
   assert.equal(lib.findDuplicate(list, { id: 'new', matn: 'نص جديد' }), undefined);

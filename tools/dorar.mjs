@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Import authentic hadiths from dorar.net into hadith-card.html.
+/* Import authentic hadiths from dorar.net into the Hadith card (index.html).
 
      npm run dorar -- search "إنما الأعمال بالنيات" [--page 2] [--any-book]
      npm run dorar -- add <result number | dorar.net/h/… link> --cat <ibadat|akhlaq|iman|dhikr> [--dry-run] [--force] [--any-book]
@@ -13,24 +13,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as lib from './dorar-lib.mjs';
 
-const CARD = fileURLToPath(new URL('../hadith-card.html', import.meta.url));
+const CARD = fileURLToPath(new URL('../index.html', import.meta.url));
 const CACHE_DIR = fileURLToPath(new URL('./.cache/', import.meta.url));
 const LAST_SEARCH = path.join(CACHE_DIR, 'last-search.json');
 const CACHE_HOURS = 24;
 const REQUEST_GAP_MS = 1500;
 const USER_AGENT = 'IslamicImageGenerator-DorarImport/1.0 (+https://github.com/AhmedTrad/Islamic-image-generator)';
 
-const HELP = `Import authentic hadiths from dorar.net into hadith-card.html.
+const HELP = `Import authentic hadiths from dorar.net into the Hadith card (index.html).
 
   npm run dorar -- search "<words from the hadith>" [--page <n>] [--any-book]
       Lists dorar.net results. ✓ marks a sahih hadith from one of the main collections.
 
   npm run dorar -- add <result number | dorar.net/h/… link> --cat <${lib.CATEGORY_IDS.join('|')}>
       Adds a hadith (with Dorar's grade, source and a benefit from its explanation) to the card.
-      --dry-run   show the entry without changing hadith-card.html
+      --dry-run   show the entry without changing index.html
       --force     add it even if it isn't sahih or isn't from a main collection
       --any-book  accept sahih hadiths from any book, not only the main collections
-      --card <path>  use another copy of hadith-card.html`;
+      --card <path>  use another copy of the card page`;
 
 class UsageError extends Error {}
 
@@ -154,7 +154,7 @@ async function add(args) {
   console.log(JSON.stringify(entry, null, 2));
   for (const note of notes) console.log('note: ' + note);
   if (args['dry-run']) {
-    console.log('\nDry run: hadith-card.html was not changed.');
+    console.log('\nDry run: index.html was not changed.');
     return;
   }
   list.push(entry);
