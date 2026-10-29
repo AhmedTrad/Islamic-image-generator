@@ -8,6 +8,11 @@ Arabic-inspired text-to-image generator with ornamental frames, calligraphy font
 islamic-image-generator/
 ├── index.html          # Entry point
 ├── hadith-card.html    # Daily Hadith card generator (standalone, single file)
+├── package.json        # Node tooling for the dorar.net importer
+├── tools/
+│   ├── dorar.mjs           # CLI: search dorar.net, add hadiths to the card
+│   ├── dorar-lib.mjs       # Page parsing, authenticity checks, card data block
+│   └── dorar-lib.test.mjs  # Parser tests (npm test)
 ├── README.md
 └── assets/
     ├── css/
@@ -33,7 +38,31 @@ A self-contained page that renders a minimalist card for an authentic (صحيح)
 - **Export:** "تنزيل الصورة" paints the laid-out card onto a canvas word by word, so Arabic shaping, tashkeel and the web fonts (Amiri, Readex Pro) match the preview.
 - **Links:** each hadith has its own URL hash, e.g. `hadith-card.html#muslim-2594`.
 
-To add a hadith, append an entry to the `HADITHS` array in the page's script with `id`, `cat`, `matn`, `source`, `refs`, `narrator` and `sharh`.
+The hadith list lives in the `<script id="hadith-data">` JSON block inside the page. Each entry has `id`, `cat`, `matn`, `source`, `refs`, `narrator` and `sharh`. Add entries by hand, or import them from dorar.net (below).
+
+### Importing hadiths from dorar.net
+
+`tools/dorar.mjs` searches [الموسوعة الحديثية on dorar.net](https://dorar.net/hadith) and adds results to the card. It needs Node.js 18.17 or newer.
+
+```bash
+npm install
+```
+
+```bash
+npm run dorar -- search "إنما الأعمال بالنيات"
+```
+
+```bash
+npm run dorar -- add 1 --cat iman
+```
+
+- **search** lists Dorar's results with the source book and number, the grading scholar, the grade and the narrator. ✓ marks a sahih hadith from one of the main collections (al-Bukhari, Muslim, Abu Dawud, at-Tirmidhi, an-Nasa'i, Ibn Majah, Riyad as-Salihin).
+- **add** takes a result number from the last search, or a `dorar.net/h/…` link. It refuses weak or non-sahih hadiths unless you pass `--force`, and refuses hadiths already on the card. It fills `source`, `refs` and `narrator` from Dorar. It takes `sharh` from the «وفي الحديث» lessons in Dorar's explanation and credits it on the card as «من شرح الدرر السنية».
+- `--dry-run` shows the entry without changing the page; `--cat` is one of `ibadat`, `akhlaq`, `iman`, `dhikr`.
+- The tool warns when the matn isn't fully vocalized (Dorar's texts often aren't) or is very long. Read each new entry before publishing.
+- It sends one request at a time with a pause between them and caches pages for a day in `tools/.cache/`. If dorar.net refuses a request (HTTP 403, common from cloud servers), the tool stops instead of trying to get around it. Run it from a normal home connection.
+
+`npm test` runs the parser tests. Page structure follows the MIT-licensed [dorar-hadith-api](https://github.com/AhmedElTabarani/dorar-hadith-api).
 
 Serve it the same way as the main app (below), then open <http://localhost:5500/hadith-card.html>.
 
