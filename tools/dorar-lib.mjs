@@ -9,17 +9,22 @@ import { parseHTML } from 'linkedom';
 export const DORAR = 'https://www.dorar.net';
 export const CATEGORY_IDS = ['ibadat', 'akhlaq', 'iman', 'dhikr'];
 
-// Collections the card accepts by default, with the id prefix each one gets.
+// Collections the card accepts by default: dorar.net book id, exact name on dorar.net, id prefix on the card.
+// Names must match exactly: dorar.net also has «مختصر سنن أبي داود», «تخريج سنن الترمذي» and the like.
 const BOOKS = [
-  ['صحيح البخاري', 'bukhari'],
-  ['صحيح مسلم', 'muslim'],
-  ['سنن أبي داود', 'abudawud'],
-  ['سنن الترمذي', 'tirmidhi'],
-  ['سنن النسائي', 'nasai'],
-  ['سنن ابن ماجه', 'ibnmajah'],
-  ['رياض الصالحين', 'riyad'],
+  { dorarId: '6216', name: 'صحيح البخاري', slug: 'bukhari', sahih: true },
+  { dorarId: '3088', name: 'صحيح مسلم', slug: 'muslim', sahih: true },
+  { dorarId: '6267', name: 'سنن أبي داود', slug: 'abudawud' },
+  { dorarId: '13509', name: 'سنن الترمذي', slug: 'tirmidhi' },
+  { dorarId: '13508', name: 'سنن النسائي', slug: 'nasai' },
+  { dorarId: '6264', name: 'سنن ابن ماجة', slug: 'ibnmajah' },
+  { dorarId: '11155', name: 'رياض الصالحين', slug: 'riyad' },
 ];
-const WEAK_GRADE = /ضعيف|منكر|موضوع|باطل|لا يصح|لم يصح|شاذ|لا أصل|مكذوب|معلول/;
+export const MAIN_BOOK_IDS = BOOKS.map((b) => b.dorarId);
+
+// «صحيح» but not «صحيحه» (as in «أخرجه في صحيحه», which names a book, not a grade).
+const SAHIH_GRADE = /صحيح(?!ه)|متفق عليه/;
+const WEAK_GRADE = /ضعيف|منكر|موضوع|باطل|لا يصح|لم يصح|شاذ|لا أصل|مكذوب|معلول|معلق|تعليق/;
 
 const LABELS = {
   rawi: 'الراوي',
@@ -115,28 +120,41 @@ export function parseHadithRef(value) {
 
 /* ─── Rules ─── */
 
-const bookSlug = (book) => BOOKS.find(([name]) => book.includes(name))?.[1] || null;
+const findBook = (book) => BOOKS.find((b) => b.name === squash(book || '')) || null;
 
 export function assess(hadith, { anyBook = false } = {}) {
+  const book = findBook(hadith.book);
   const reasons = [];
-  if (!/صحيح/.test(hadith.grade) || WEAK_GRADE.test(hadith.grade)) {
-    reasons.push(`grade is «${hadith.grade || 'missing'}», not sahih`);
-  }
-  if (!anyBook && !bookSlug(hadith.book)) {
-    reasons.push(`source «${hadith.book || 'missing'}» isn't one of the main collections`);
+  if (!anyBook && !book) reasons.push(`source «${hadith.book || 'missing'}» isn't one of the main collections`);
+  // Everything in al-Bukhari and Muslim is sahih; Dorar's note there may be a remark on extra chains, so only
+  // a note marking the hadith as suspended (معلق) or criticized rules it out.
+  if (book?.sahih) {
+    if (WEAK_GRADE.test(hadith.grade)) reasons.push(`Dorar's note «${clip(hadith.grade, 60)}» marks it as suspended or criticized`);
+  } else if (!SAHIH_GRADE.test(hadith.grade) || WEAK_GRADE.test(hadith.grade)) {
+    reasons.push(`grade is «${clip(hadith.grade || 'missing', 60)}», not sahih`);
   }
   return { ok: reasons.length === 0, reasons };
 }
 
 // Share of Arabic letters carrying a haraka; fully vocalized text is roughly 0.8 or more.
 export function tashkeelRatio(text) {
-  const letters = (text.match(/[ء-ي]/g) || []).length;
-  const marks = (text.match(/[ً-ْ]/g) || []).length;
+  const letters = (text.match(/[\u0621-\u064A]/g) || []).length;
+  const marks = (text.match(/[\u064B-\u0652]/g) || []).length;
   return letters ? marks / letters : 0;
 }
 
-const stripTashkeel = (s) => s.replace(/[ً-ْٰـ]/g, '');
-export const sameText = (a, b) => squash(stripTashkeel(a)).replace(/[^ء-ي ]/g, '') === squash(stripTashkeel(b)).replace(/[^ء-ي ]/g, '');
+const stripTashkeel = (s) => s.replace(/[\u064B-\u0652\u0670\u0640]/g, '');
+const lettersOnly = (s) => squash(stripTashkeel(s)).replace(/[^\u0621-\u064A ]/g, '');
+export const sameText = (a, b) => lettersOnly(a) === lettersOnly(b);
+
+// Words that open a narration («قالوا: يا رسول الله…», «إنَّ رجلًا سأل…») rather than the Prophet's own words.
+const NARRATION_START = /^(قال|قالت|قالوا|قلت|قلنا|سألت|سأل|سئل|إن رجلا|أن رجلا|أن النبي|أن رسول|كان|عن|جاء|أتى|سمعت|بينما|رأيت|دخل|خرج)(?=[\s:،]|$)/;
+
+// The opening words when the matn starts with narration, or null.
+export function narrationOpening(text) {
+  const plain = squash(stripTashkeel(text)).replace(/^[«"(\s]+/, '');
+  return NARRATION_START.test(plain) ? plain.split(' ').slice(0, 3).join(' ') : null;
+}
 
 function clip(text, max) {
   if (text.length <= max) return text;
@@ -159,9 +177,10 @@ export function benefitFromSharh(sharh, max = 190) {
 }
 
 export function toCardEntry(hadith, { cat, sharh }) {
-  const slug = bookSlug(hadith.book);
+  const book = findBook(hadith.book);
+  const slug = book?.slug;
   const number = /^\d+$/.test(hadith.number) ? hadith.number : null;
-  const sahihain = slug === 'bukhari' || slug === 'muslim';
+  const sahihain = !!book?.sahih;
   let refs = number ? `رقم (${number})` : `الصفحة أو الرقم: ${hadith.number}`;
   if (!sahihain && hadith.mohdith) refs += `، ${hadith.mohdith}: ${hadith.grade}`;
   const matn = /[.!؟»]$/.test(hadith.text) ? hadith.text : hadith.text + '.';
@@ -174,6 +193,7 @@ export function toCardEntry(hadith, { cat, sharh }) {
     narrator: hadith.rawi,
     sharh: sharh ? sharh.text : '',
   };
+  if (narrationOpening(matn)) entry.intro = false;
   if (sharh) entry.sharhSource = 'الدرر السنية';
   if (hadith.id) entry.dorarId = hadith.id;
   return entry;

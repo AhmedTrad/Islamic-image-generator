@@ -322,7 +322,7 @@
 
             <div id="matnZone" class="flex min-h-0 flex-1 flex-col justify-center py-6">
               <div id="matnInner">
-                <p class="mb-2 text-[16px] font-medium text-emerald-800">قال رسول الله ﷺ:</p>
+                <p id="cIntro" class="mb-2 text-[16px] font-medium text-emerald-800">قال رسول الله ﷺ:</p>
                 <p id="cMatn" class="font-matn leading-[2.2] text-[#1E293B]" style="font-size:30px"></p>
                 <div class="mt-4 flex items-center gap-3 text-[13px] leading-[1.6]">
                   <span class="h-px w-8 flex-none bg-emerald-800/30"></span>
@@ -624,7 +624,8 @@
   /* ─── Content ───
      The hadith list lives in the #hadith-data block above: strictly authentic narrations whose wording
      follows the collection named in `refs` (Bukhari: standard numbering; Muslim: Fuad Abd al-Baqi numbering).
-     Entries imported from dorar.net carry `sharhSource` and `dorarId`. */
+     Entries imported from dorar.net carry `sharhSource` and `dorarId`; `intro: false` hides «قال رسول الله ﷺ:»
+     for a matn that opens with its own narration. */
   const CATEGORIES = [
     { id: 'ibadat', name: 'العبادات والأركان' },
     { id: 'akhlaq', name: 'مكارم الأخلاق' },
@@ -708,6 +709,7 @@
     $('#cCategory').textContent = categoryName(h.cat);
     $('#cDate').textContent = HIJRI;
     $('#cDate').hidden = !state.showDate || !HIJRI;
+    $('#cIntro').hidden = h.intro === false;
     $('#cMatn').textContent = h.matn;
     $('#cSource').textContent = h.source;
     $('#cRefs').textContent = arabicDigits(h.refs);
@@ -939,6 +941,8 @@
 
   function hadithText() {
     const h = current();
+    // Entries with `intro: false` carry their own narration («قالوا: …»), so they get neither the intro nor quotes.
+    if (h.intro === false) return h.matn + '\n' + h.source + ': ' + h.refs + '\nالراوي: ' + h.narrator;
     const matn = h.matn.startsWith('«') ? h.matn : '«' + h.matn + '»';
     return 'قال رسول الله ﷺ:\n' + matn + '\n' + h.source + ': ' + h.refs + '\nالراوي: ' + h.narrator;
   }

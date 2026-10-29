@@ -18,12 +18,14 @@ const CACHE_DIR = fileURLToPath(new URL('./.cache/', import.meta.url));
 const LAST_SEARCH = path.join(CACHE_DIR, 'last-search.json');
 const CACHE_HOURS = 24;
 const REQUEST_GAP_MS = 1500;
+const SITE_PAGE_SIZE = 30; // results per dorar.net search page
 const USER_AGENT = 'IslamicImageGenerator-DorarImport/1.0 (+https://github.com/AhmedTrad/Islamic-image-generator)';
 
 const HELP = `Import authentic hadiths from dorar.net into the Hadith card (index.html).
 
   node tools/dorar.mjs search "<words from the hadith>" [--page <n>] [--any-book]
-      Lists dorar.net results. ✓ marks a sahih hadith from one of the main collections.
+      Lists dorar.net results from the main collections (al-Bukhari, Muslim, the four Sunan, Riyad as-Salihin).
+      ✓ marks a sahih hadith. --any-book searches every book on dorar.net.
 
   node tools/dorar.mjs add <result number | dorar.net/h/… link> --cat <${lib.CATEGORY_IDS.join('|')}>
       Adds a hadith (with Dorar's grade, source and a benefit from its explanation) to the card.
@@ -84,7 +86,9 @@ async function search(args) {
   const query = args._.slice(1).join(' ').trim();
   if (!query) throw new UsageError('Give some words from the hadith, e.g.  node tools/dorar.mjs search "إنما الأعمال بالنيات"');
   const page = Math.max(1, Number(args.page) || 1);
-  const url = `${lib.DORAR}/hadith/search?q=${encodeURIComponent(query)}${page > 1 ? `&page=${page}` : ''}`;
+  // Unless --any-book, ask Dorar for the main collections only (its s[] book filter).
+  const books = args['any-book'] ? '' : lib.MAIN_BOOK_IDS.map((id) => `&${encodeURIComponent('s[]')}=${id}`).join('');
+  const url = `${lib.DORAR}/hadith/search?q=${encodeURIComponent(query)}${books}${page > 1 ? `&page=${page}` : ''}`;
   const { total, results } = lib.parseSearchPage(await fetchPage(url));
 
   await mkdir(CACHE_DIR, { recursive: true });
@@ -94,14 +98,17 @@ async function search(args) {
     console.log(`dorar.net has no results for «${query}»${page > 1 ? ` on page ${page}` : ''}.`);
     return;
   }
-  console.log(`dorar.net · «${query}» · page ${page} · ${results.length} shown of ${total}\n`);
+  const scope = args['any-book'] ? 'all books' : 'main collections';
+  console.log(`dorar.net · «${query}» · ${scope} · page ${page} · ${results.length} shown of ${total}\n`);
   results.forEach((h, i) => {
     const verdict = lib.assess(h, { anyBook: args['any-book'] });
-    console.log(`${String(i + 1).padStart(2)}  ${verdict.ok ? '✓' : '✗'}  ${h.book} ${h.number} · ${h.mohdith} · ${h.grade} · ${h.rawi}${h.sharhId ? ' · شرح' : ''}`);
+    console.log(`${String(i + 1).padStart(2)}  ${verdict.ok ? '✓' : '✗'}  ${h.book} ${h.number} · ${h.mohdith} · ${oneLine(h.grade, 40)} · ${h.rawi}${h.sharhId ? ' · شرح' : ''}`);
     console.log(`      ${oneLine(h.text)}`);
     if (!verdict.ok) console.log(`      not eligible: ${verdict.reasons.join('; ')}`);
   });
+  if (total > page * SITE_PAGE_SIZE) console.log(`\nMore results:  node tools/dorar.mjs search "${query}" --page ${page + 1}${args['any-book'] ? ' --any-book' : ''}`);
   console.log(`\nAdd one with:  node tools/dorar.mjs add <number> --cat <${lib.CATEGORY_IDS.join('|')}>`);
+  if (!args['any-book']) console.log('To search every book on dorar.net, add --any-book.');
 }
 
 async function loadFromLastSearch(number) {
@@ -154,6 +161,7 @@ async function add(args) {
   const ratio = lib.tashkeelRatio(entry.matn);
   if (ratio < 0.6) notes.push(`The matn is only partly vocalized (${Math.round(ratio * 100)}% of letters have tashkeel); the card style calls for full tashkeel.`);
   if (entry.matn.length > 320) notes.push('The matn is long, so the card will set it in a smaller size.');
+  if (entry.intro === false) notes.push(`The matn opens with narration («${lib.narrationOpening(entry.matn)}…»), so the card hides its «قال رسول الله ﷺ:» line for this hadith.`);
   if (!sharh) notes.push('Dorar has no explanation for this hadith, so الفائدة is empty and the card hides it. Write one before publishing.');
   else if (!sharh.fromLessons) notes.push('الفائدة was taken from the opening of Dorar\'s explanation; check that it reads well on its own.');
 

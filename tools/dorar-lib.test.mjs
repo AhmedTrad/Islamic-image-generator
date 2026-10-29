@@ -77,6 +77,33 @@ test('accepts only sahih hadiths from the main collections', () => {
   assert.equal(lib.assess({ ...bukhari, grade: 'إسناده ضعيف وله شاهد صحيح' }).ok, false);
 });
 
+// Cases seen in a live dorar.net search and in its book list.
+test('matches book names exactly and reads Sahihain notes correctly', () => {
+  const hadith = (book, grade) => ({ text: 'x', rawi: 'r', mohdith: 'm', book, number: '1', grade });
+  // al-Bukhari 10: Dorar's "grade" is a note on extra chains, and the hadith is sahih.
+  assert.equal(lib.assess(hadith('صحيح البخاري', 'أورده في صحيحه وقال : أبو معاوية حدثنا داود عن عامر')).ok, true);
+  assert.equal(lib.assess(hadith('صحيح البخاري', 'معلق')).ok, false);
+  // «أخرجه في صحيحه» names Ibn Hibban's book, it is not a grade.
+  assert.equal(lib.assess(hadith('صحيح ابن حبان', 'أخرجه في صحيحه'), { anyBook: true }).ok, false);
+  for (const near of ['مختصر سنن أبي داود', 'تخريج سنن الترمذي', 'شرح رياض الصالحين لابن عثيمين', 'أحاديث من صحيح البخاري أعلها الدارقطني', 'صحيح الترمذي']) {
+    assert.equal(lib.assess(hadith(near, 'صحيح')).ok, false, near);
+  }
+  assert.equal(lib.assess(hadith('سنن ابن ماجة', 'صحيح')).ok, true);
+  assert.equal(lib.toCardEntry(hadith('سنن ابن ماجة', 'صحيح'), { cat: 'iman' }).id, 'ibnmajah-1');
+  assert.equal(lib.MAIN_BOOK_IDS.length, 7);
+});
+
+test('flags a matn that opens with narration', async () => {
+  assert.equal(lib.narrationOpening('قالوا: يا رَسولَ اللهِ، أيُّ الإسلامِ أفضَلُ؟ قال: مَن سَلِمَ المُسلِمونَ'), 'قالوا: يا رسول');
+  assert.equal(lib.narrationOpening('إنَّ رَجُلًا سَألَ رَسولَ اللهِ صلَّى اللهُ عليه وسلَّم'), 'إن رجلا سأل');
+  assert.equal(lib.narrationOpening('المُسلِمُ مَن سَلِمَ المُسلِمونَ مِن لسانِه ويَدِه'), null);
+  const entry = lib.toCardEntry({ text: 'قالوا: يا رَسولَ اللهِ', rawi: 'r', mohdith: 'البخاري', book: 'صحيح البخاري', number: '11', grade: 'صحيح' }, { cat: 'iman' });
+  assert.equal(entry.intro, false);
+  // None of the hand-written hadiths on the card should lose their «قال رسول الله ﷺ:» line.
+  const list = lib.readCardData(await readFile(new URL('../index.html', import.meta.url), 'utf8'));
+  assert.deepEqual(list.filter((h) => lib.narrationOpening(h.matn)).map((h) => h.id), []);
+});
+
 test('takes the benefit from the «وفي الحديث» lessons', () => {
   const sharh = lib.parseSharhPage(sharhHtml('النية محلها القلب. وفي الحديث: الحثُّ على الإخلاصِ في الأعمال، وفيه: أنَّ الأعمال بخواتيمها.'));
   assert.deepEqual(lib.benefitFromSharh(sharh), { text: 'في الحديث: الحثُّ على الإخلاصِ في الأعمال.', fromLessons: true });
