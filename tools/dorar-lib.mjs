@@ -1,6 +1,6 @@
 /* ─── dorar.net → hadith card ───
    Parses dorar.net search, hadith and sharh pages, checks a result against the card's
-   authenticity rules, and turns it into an entry for the #hadith-data block in hadith-card.html.
+   authenticity rules, and turns it into an entry for the #hadith-data block in index.html.
    Page structure follows dorar.net's markup as used by the MIT-licensed dorar-hadith-api
    (https://github.com/AhmedElTabarani/dorar-hadith-api). */
 
@@ -179,13 +179,13 @@ export function toCardEntry(hadith, { cat, sharh }) {
   return entry;
 }
 
-/* ─── hadith-card.html data block ─── */
+/* ─── index.html data block ─── */
 
 const DATA_BLOCK = /(<script type="application\/json" id="hadith-data">)([\s\S]*?)(<\/script>)/;
 
 export function readCardData(html) {
   const match = html.match(DATA_BLOCK);
-  if (!match) throw new Error('No <script id="hadith-data"> block in hadith-card.html.');
+  if (!match) throw new Error('No <script id="hadith-data"> block in index.html.');
   return JSON.parse(match[2]);
 }
 

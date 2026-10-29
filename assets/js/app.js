@@ -209,6 +209,10 @@ function App() {
                             Swap colors, preview layouts, and use the same heritage-inspired palette for invitations, quote cards, certificates, or branding mockups.
                         </p>
                     </div>
+                    <a href="index.html"
+                        className="inline-flex items-center gap-2 self-start rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm font-semibold text-stone-700 shadow-sm transition hover:shadow-md lg:self-center">
+                        ← Daily Hadith card · <span dir="rtl" lang="ar">حديث اليوم</span>
+                    </a>
                 </header>
 
                 {/* Text to Image Generator */}

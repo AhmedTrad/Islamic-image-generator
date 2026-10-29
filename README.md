@@ -1,20 +1,20 @@
 # Islamic Image Generator
 
-Arabic-inspired text-to-image generator with ornamental frames, calligraphy fonts, and live preview.
+Daily Hadith cards, plus an Arabic-inspired text-to-image studio with ornamental frames, calligraphy fonts, and live preview.
 
 ## Project Structure
 
 ```
 islamic-image-generator/
-├── index.html          # Entry point
-├── hadith-card.html    # Daily Hadith card generator (standalone, single file)
+├── index.html          # Main page: daily Hadith card (standalone, single file)
+├── studio.html         # Text-to-image studio (React app)
 ├── package.json        # Node tooling for the dorar.net importer
 ├── tools/
 │   ├── dorar.mjs           # CLI: search dorar.net, add hadiths to the card
 │   ├── dorar-lib.mjs       # Page parsing, authenticity checks, card data block
 │   └── dorar-lib.test.mjs  # Parser tests (npm test)
 ├── README.md
-└── assets/
+└── assets/             # Studio files
     ├── css/
     │   └── styles.css      # Custom styles (scrollbar, range, color inputs)
     ├── js/
@@ -28,15 +28,15 @@ islamic-image-generator/
     └── img/                # Place any image assets here
 ```
 
-## Daily Hadith Card (`hadith-card.html`)
+## Daily Hadith Card (`index.html`)
 
-A self-contained page that renders a minimalist card for an authentic (صحيح) hadith and exports it as a PNG.
+A self-contained page that renders a minimalist card for an authentic (صحيح) hadith and exports it as a PNG. It links to the studio for free-text cards.
 
 - **Content:** 21 narrations from Sahih al-Bukhari, Sahih Muslim and Jami' at-Tirmidhi (graded حسن صحيح), each with full tashkeel, takhrij (collection and number, plus «واللفظ لـ…» where the two Sahihs differ), narrator, and a one-line benefit (الفائدة).
 - **Categories:** العبادات والأركان · مكارم الأخلاق · الإيمان والإخلاص · الأذكار وفضائل الأعمال. The daily pick rotates through them by date, so consecutive days change theme.
 - **Formats:** square 1080 × 1080 and landscape 1200 × 900. The matn font size is fitted automatically so long narrations never overflow.
 - **Export:** "تنزيل الصورة" paints the laid-out card onto a canvas word by word, so Arabic shaping, tashkeel and the web fonts (Amiri, Readex Pro) match the preview.
-- **Links:** each hadith has its own URL hash, e.g. `hadith-card.html#muslim-2594`.
+- **Links:** each hadith has its own URL hash, e.g. `index.html#muslim-2594`.
 
 The hadith list lives in the `<script id="hadith-data">` JSON block inside the page. Each entry has `id`, `cat`, `matn`, `source`, `refs`, `narrator` and `sharh`. Add entries by hand, or import them from dorar.net (below).
 
@@ -64,11 +64,9 @@ npm run dorar -- add 1 --cat iman
 
 `npm test` runs the parser tests. Page structure follows the MIT-licensed [dorar-hadith-api](https://github.com/AhmedElTabarani/dorar-hadith-api).
 
-Serve it the same way as the main app (below), then open <http://localhost:5500/hadith-card.html>.
-
 ## Running the App
 
-> **Important:** Because Babel loads `assets/js/app.js` via HTTP, you must serve the project through a local server — opening `index.html` directly as a `file://` URL will not work.
+The Hadith card (`index.html`) works when opened directly in a browser. The studio (`studio.html`) does not: Babel loads `assets/js/app.js` over HTTP, so serve the project through a local server to use both.
 
 ### Option 1 — Python (no install needed)
 
@@ -77,7 +75,7 @@ cd islamic-image-generator
 python -m http.server 5500
 ```
 
-Then open <http://localhost:5500> in your browser.
+Then open <http://localhost:5500> for the Hadith card, or <http://localhost:5500/studio.html> for the studio.
 
 ### Option 2 — VS Code Live Server extension
 
@@ -94,6 +92,6 @@ npx serve .
 
 | Resource | Required? |
 |---|---|
-| React, ReactDOM, Babel | ✅ Local (`assets/lib/`) |
+| React, ReactDOM, Babel (studio) | ✅ Local (`assets/lib/`) |
 | Tailwind CSS | 🌐 CDN |
-| Arabic fonts (Amiri, Scheherazade New, Noto Naskh Arabic) | 🌐 Google Fonts |
+| Arabic fonts (Amiri, Readex Pro, Scheherazade New, Noto Naskh Arabic) | 🌐 Google Fonts |
