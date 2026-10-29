@@ -7,6 +7,7 @@ Arabic-inspired text-to-image generator with ornamental frames, calligraphy font
 ```
 islamic-image-generator/
 ├── index.html          # Entry point
+├── hadith-card.html    # Daily Hadith card generator (standalone, single file)
 ├── README.md
 └── assets/
     ├── css/
@@ -21,6 +22,20 @@ islamic-image-generator/
     │   └── react.development.js
     └── img/                # Place any image assets here
 ```
+
+## Daily Hadith Card (`hadith-card.html`)
+
+A self-contained page that renders a minimalist card for an authentic (صحيح) hadith and exports it as a PNG.
+
+- **Content:** 21 narrations from Sahih al-Bukhari, Sahih Muslim and Jami' at-Tirmidhi (graded حسن صحيح), each with full tashkeel, takhrij (collection and number, plus «واللفظ لـ…» where the two Sahihs differ), narrator, and a one-line benefit (الفائدة).
+- **Categories:** العبادات والأركان · مكارم الأخلاق · الإيمان والإخلاص · الأذكار وفضائل الأعمال. The daily pick rotates through them by date, so consecutive days change theme.
+- **Formats:** square 1080 × 1080 and landscape 1200 × 900. The matn font size is fitted automatically so long narrations never overflow.
+- **Export:** "تنزيل الصورة" paints the laid-out card onto a canvas word by word, so Arabic shaping, tashkeel and the web fonts (Amiri, Readex Pro) match the preview.
+- **Links:** each hadith has its own URL hash, e.g. `hadith-card.html#muslim-2594`.
+
+To add a hadith, append an entry to the `HADITHS` array in the page's script with `id`, `cat`, `matn`, `source`, `refs`, `narrator` and `sharh`.
+
+Serve it the same way as the main app (below), then open <http://localhost:5500/hadith-card.html>.
 
 ## Running the App
 
