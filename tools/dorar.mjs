@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /* Import authentic hadiths from dorar.net into the Hadith card (index.html).
 
-     npm run dorar -- search "إنما الأعمال بالنيات" [--page 2] [--any-book]
-     npm run dorar -- add <result number | dorar.net/h/… link> --cat <ibadat|akhlaq|iman|dhikr> [--dry-run] [--force] [--any-book]
+     node tools/dorar.mjs search "إنما الأعمال بالنيات" [--page 2] [--any-book]
+     node tools/dorar.mjs add <result number | dorar.net/h/… link> --cat <ibadat|akhlaq|iman|dhikr> [--dry-run] [--force] [--any-book]
 
    Requests are sent one at a time with a pause between them, and pages are cached for a day
    in tools/.cache. If dorar.net refuses a request the tool stops; it never tries to get around a block. */
@@ -22,10 +22,10 @@ const USER_AGENT = 'IslamicImageGenerator-DorarImport/1.0 (+https://github.com/A
 
 const HELP = `Import authentic hadiths from dorar.net into the Hadith card (index.html).
 
-  npm run dorar -- search "<words from the hadith>" [--page <n>] [--any-book]
+  node tools/dorar.mjs search "<words from the hadith>" [--page <n>] [--any-book]
       Lists dorar.net results. ✓ marks a sahih hadith from one of the main collections.
 
-  npm run dorar -- add <result number | dorar.net/h/… link> --cat <${lib.CATEGORY_IDS.join('|')}>
+  node tools/dorar.mjs add <result number | dorar.net/h/… link> --cat <${lib.CATEGORY_IDS.join('|')}>
       Adds a hadith (with Dorar's grade, source and a benefit from its explanation) to the card.
       --dry-run   show the entry without changing index.html
       --force     add it even if it isn't sahih or isn't from a main collection
@@ -82,7 +82,7 @@ const oneLine = (text, max = 110) => (text.length > max ? text.slice(0, max) + '
 
 async function search(args) {
   const query = args._.slice(1).join(' ').trim();
-  if (!query) throw new UsageError('Give some words from the hadith, e.g.  npm run dorar -- search "إنما الأعمال بالنيات"');
+  if (!query) throw new UsageError('Give some words from the hadith, e.g.  node tools/dorar.mjs search "إنما الأعمال بالنيات"');
   const page = Math.max(1, Number(args.page) || 1);
   const url = `${lib.DORAR}/hadith/search?q=${encodeURIComponent(query)}${page > 1 ? `&page=${page}` : ''}`;
   const { total, results } = lib.parseSearchPage(await fetchPage(url));
@@ -101,7 +101,7 @@ async function search(args) {
     console.log(`      ${oneLine(h.text)}`);
     if (!verdict.ok) console.log(`      not eligible: ${verdict.reasons.join('; ')}`);
   });
-  console.log(`\nAdd one with:  npm run dorar -- add <number> --cat <${lib.CATEGORY_IDS.join('|')}>`);
+  console.log(`\nAdd one with:  node tools/dorar.mjs add <number> --cat <${lib.CATEGORY_IDS.join('|')}>`);
 }
 
 async function loadFromLastSearch(number) {
@@ -119,7 +119,13 @@ async function loadFromLastSearch(number) {
 async function add(args) {
   const ref = args._[1];
   if (!ref) throw new UsageError('Say which hadith to add: a result number from the last search, or a dorar.net/h/… link.');
-  if (!lib.CATEGORY_IDS.includes(args.cat)) throw new UsageError(`Choose a category with --cat ${lib.CATEGORY_IDS.join('|')}.`);
+  if (!lib.CATEGORY_IDS.includes(args.cat)) {
+    // Windows PowerShell drops the "--" in `npm run dorar -- add …`, so npm keeps --cat, --dry-run etc. for itself.
+    const lostToNpm = process.env.npm_lifecycle_event && args._.find((a) => lib.CATEGORY_IDS.includes(a));
+    throw new UsageError(lostToNpm
+      ? `The options didn't reach the tool: npm kept --cat and the other options for itself (Windows PowerShell removes the "--" in "npm run dorar -- …"). Nothing was changed. Run it with node instead:\n  node tools/dorar.mjs add ${ref} --cat ${lostToNpm} --dry-run`
+      : `Choose a category with --cat ${lib.CATEGORY_IDS.join('|')}.`);
+  }
 
   let hadith;
   if (/^\d+$/.test(ref)) {

@@ -49,16 +49,17 @@ npm install
 ```
 
 ```bash
-npm run dorar -- search "إنما الأعمال بالنيات"
+node tools/dorar.mjs search "إنما الأعمال بالنيات"
 ```
 
 ```bash
-npm run dorar -- add 1 --cat iman
+node tools/dorar.mjs add 1 --cat iman
 ```
 
 - **search** lists Dorar's results with the source book and number, the grading scholar, the grade and the narrator. ✓ marks a sahih hadith from one of the main collections (al-Bukhari, Muslim, Abu Dawud, at-Tirmidhi, an-Nasa'i, Ibn Majah, Riyad as-Salihin).
 - **add** takes a result number from the last search, or a `dorar.net/h/…` link. It refuses weak or non-sahih hadiths unless you pass `--force`, and refuses hadiths already on the card. It fills `source`, `refs` and `narrator` from Dorar. It takes `sharh` from the «وفي الحديث» lessons in Dorar's explanation and credits it on the card as «من شرح الدرر السنية».
 - `--dry-run` shows the entry without changing the page; `--cat` is one of `ibadat`, `akhlaq`, `iman`, `dhikr`.
+- Run the tool with `node` as shown. `npm run dorar -- …` also works in bash, but Windows PowerShell removes the `--`, so npm keeps the options for itself.
 - The tool warns when the matn isn't fully vocalized (Dorar's texts often aren't) or is very long. Read each new entry before publishing.
 - It sends one request at a time with a pause between them and caches pages for a day in `tools/.cache/`. If dorar.net refuses a request (HTTP 403, common from cloud servers), the tool stops instead of trying to get around it. Run it from a normal home connection.
 
