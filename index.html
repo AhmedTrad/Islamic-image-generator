@@ -710,7 +710,7 @@
     $('#cDate').hidden = !state.showDate || !HIJRI;
     $('#cMatn').textContent = h.matn;
     $('#cSource').textContent = h.source;
-    $('#cRefs').textContent = arabicDigits(h.refs);
+    $('#cRefs').textContent = h.refs;
     $('#cNarrator').textContent = 'الراوي: ' + h.narrator;
     $('#cSharh').textContent = h.sharh;
     $('#cSharhCredit').textContent = h.sharhSource ? '· من شرح ' + h.sharhSource : '';
