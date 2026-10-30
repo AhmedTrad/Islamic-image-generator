@@ -186,7 +186,7 @@
   .btn-primary:hover { background: var(--accent); border-color: transparent; filter: brightness(1.08); }
   .btn[disabled] { opacity: 0.6; cursor: progress; }
   .btn svg { flex: none; }
-  .studio-link { display: inline-block; margin-top: 10px; }
+  .search { margin-top: 12px; }
 
   .linkish {
     align-self: flex-start;
@@ -291,9 +291,7 @@
     <div>
       <p class="eyebrow">بطاقات الحديث الصحيح</p>
       <h1 class="title">حديث اليوم</h1>
-      <p class="lede">بطاقة يومية لحديث صحيح من الصحيحين وكتب السنن، مضبوطة بالشكل ومعها تخريجها وفائدتها، جاهزة للتنزيل والمشاركة.</p>
-      <!-- Shown only in the repo copy: the published artifact has no studio page -->
-      <a id="studioLink" class="linkish studio-link" href="studio.html" hidden>صمّم بطاقة بنصّ من اختيارك في الاستوديو ←</a>
+      <p class="lede">بطاقة يومية لحديث صحيح من الصحيحين وكتب السنن، من الموسوعة الحديثية في الدرر السنية، مع تخريجه وراويه، جاهزة للتنزيل والمشاركة.</p>
     </div>
     <p class="today"><strong id="todayHijri"></strong><span id="todayGregorian"></span></p>
   </header>
@@ -304,7 +302,7 @@
     <section class="stage" aria-label="معاينة البطاقة">
       <div class="stage-meta">
         <span id="stageBadge" class="badge">حديث اليوم</span>
-        <span id="stageSize">١٠٨٠ × ١٠٨٠ بكسل</span>
+        <span id="stageSize">1080 × 1080 بكسل</span>
       </div>
 
       <div id="cardSlot" class="card-slot">
@@ -322,7 +320,7 @@
 
             <div id="matnZone" class="flex min-h-0 flex-1 flex-col justify-center py-6">
               <div id="matnInner">
-                <p class="mb-2 text-[16px] font-medium text-emerald-800">قال رسول الله ﷺ:</p>
+                <p id="cLead" class="mb-2 text-[16px] font-medium text-emerald-800">قال رسول الله ﷺ:</p>
                 <p id="cMatn" class="font-matn leading-[2.2] text-[#1E293B]" style="font-size:30px"></p>
                 <div class="mt-4 flex items-center gap-3 text-[13px] leading-[1.6]">
                   <span class="h-px w-8 flex-none bg-emerald-800/30"></span>
@@ -364,6 +362,7 @@
           </button>
         </div>
         <button id="todayBtn" class="linkish" type="button" hidden>العودة إلى حديث اليوم</button>
+        <input id="searchInput" class="field search" type="search" placeholder="ابحث في نص الحديث أو الراوي أو الكتاب…" autocomplete="off" aria-label="البحث في الأحاديث" />
       </div>
 
       <fieldset class="group">
@@ -376,11 +375,11 @@
         <div class="segmented">
           <label class="seg">
             <input id="fmtSquare" type="radio" name="format" value="square" />
-            <span>مربّع<small>١٠٨٠ × ١٠٨٠</small></span>
+            <span>مربّع<small>1080 × 1080</small></span>
           </label>
           <label class="seg">
             <input id="fmtLandscape" type="radio" name="format" value="landscape" />
-            <span>أفقي<small>١٢٠٠ × ٩٠٠</small></span>
+            <span>أفقي<small>1200 × 900</small></span>
           </label>
         </div>
       </fieldset>
@@ -624,7 +623,9 @@
   /* ─── Content ───
      The hadith list lives in the #hadith-data block above: strictly authentic narrations whose wording
      follows the collection named in `refs` (Bukhari: standard numbering; Muslim: Fuad Abd al-Baqi numbering).
-     Entries imported from dorar.net carry `sharhSource` and `dorarId`. */
+     Entries added with `npm run dorar -- add` carry `sharhSource` and `dorarId`. Entries from
+     `npm run dorar -- bulk` come from dorar.net's official API, without a benefit; `lead: false` marks a
+     narration about the Prophet ﷺ, shown without «قال رسول الله ﷺ:». */
   const CATEGORIES = [
     { id: 'ibadat', name: 'العبادات والأركان' },
     { id: 'akhlaq', name: 'مكارم الأخلاق' },
@@ -643,8 +644,12 @@
   const STORE_KEY = 'hadith-card:prefs';
 
   const $ = (sel) => document.querySelector(sel);
-  const arabicDigits = (value) => String(value).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
   const categoryName = (id) => CATEGORIES.find((c) => c.id === id).name;
+
+  // Search ignores tashkeel, tatweel and the different forms of alif, ya and ta marbuta.
+  const normalize = (s) => s.replace(/[ً-ْٰـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه');
+  const SEARCH_TEXT = new Map(HADITHS.map((h) => [h, normalize([h.matn, h.narrator, h.source, h.refs].join(' '))]));
+  const matches = (h, words) => words.every((w) => SEARCH_TEXT.get(h).includes(w));
 
   // Daily rotation interleaves the categories so consecutive days change theme.
   const ORDER = (() => {
@@ -661,8 +666,8 @@
   const formatDate = (locale, options) => {
     try { return new Intl.DateTimeFormat(locale, options).format(now); } catch (e) { return ''; }
   };
-  const HIJRI = formatDate('ar-SA-u-ca-islamic-umalqura-nu-arab', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const GREGORIAN = formatDate('ar-EG-u-nu-arab', { day: 'numeric', month: 'long', year: 'numeric' });
+  const HIJRI = formatDate('ar-SA-u-ca-islamic-umalqura-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const GREGORIAN = formatDate('ar-EG-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' });
 
   /* ─── State ─── */
   const prefs = (() => {
@@ -679,6 +684,7 @@
   const state = {
     index: TODAY,
     filter: 'all',
+    query: '',
     format: FORMATS[prefs.format] ? prefs.format : 'square',
     showDate: prefs.showDate !== false,
     showSharh: prefs.showSharh !== false,
@@ -692,7 +698,10 @@
   if (indexFromHash() !== -1) state.index = indexFromHash();
 
   const current = () => ORDER[state.index];
-  const visibleList = () => (state.filter === 'all' ? ORDER : ORDER.filter((h) => h.cat === state.filter));
+  const visibleList = () => {
+    const words = normalize(state.query).split(/\s+/).filter(Boolean);
+    return ORDER.filter((h) => (state.filter === 'all' || h.cat === state.filter) && matches(h, words));
+  };
 
   /* ─── Rendering ─── */
   const card = $('#card');
@@ -706,6 +715,7 @@
     card.style.height = f.h + 'px';
 
     $('#cCategory').textContent = categoryName(h.cat);
+    $('#cLead').hidden = h.lead === false;
     $('#cDate').textContent = HIJRI;
     $('#cDate').hidden = !state.showDate || !HIJRI;
     $('#cMatn').textContent = h.matn;
@@ -723,12 +733,13 @@
   function renderControls() {
     const list = visibleList();
     const pos = list.indexOf(current());
-    $('#counter').textContent = arabicDigits(pos + 1) + ' من ' + arabicDigits(list.length);
+    $('#counter').textContent = list.length ? (pos + 1) + ' من ' + list.length : 'لا نتائج';
+    $('#prevBtn').disabled = $('#nextBtn').disabled = list.length === 0 || (list.length === 1 && pos === 0);
     const isToday = state.index === TODAY;
     $('#todayBtn').hidden = isToday;
     $('#stageBadge').textContent = isToday ? 'حديث اليوم' : categoryName(current().cat);
     const f = FORMATS[state.format];
-    $('#stageSize').textContent = arabicDigits(f.outW) + ' × ' + arabicDigits(f.outH) + ' بكسل';
+    $('#stageSize').textContent = f.outW + ' × ' + f.outH + ' بكسل';
     document.querySelectorAll('input[name="filter"]').forEach((el) => { el.checked = el.value === state.filter; });
     $('#fmtSquare').checked = state.format === 'square';
     $('#fmtLandscape').checked = state.format === 'landscape';
@@ -781,6 +792,7 @@
   }
   function step(dir) {
     const list = visibleList();
+    if (!list.length) return;
     let pos = list.indexOf(current());
     pos = pos === -1 ? 0 : (pos + dir + list.length) % list.length;
     go(ORDER.indexOf(list[pos]));
@@ -940,7 +952,7 @@
   function hadithText() {
     const h = current();
     const matn = h.matn.startsWith('«') ? h.matn : '«' + h.matn + '»';
-    return 'قال رسول الله ﷺ:\n' + matn + '\n' + h.source + ': ' + h.refs + '\nالراوي: ' + h.narrator;
+    return (h.lead === false ? '' : 'قال رسول الله ﷺ:\n') + matn + '\n' + h.source + ': ' + h.refs + '\nالراوي: ' + h.narrator;
   }
   function copyText() {
     const text = hadithText();
@@ -969,7 +981,6 @@
     '<label class="chip"><input id="filter-' + c.id + '" type="radio" name="filter" value="' + c.id + '" /><span>' + c.name + '</span></label>'
   ).join('');
 
-  $('#studioLink').hidden = inViewer;
   $('#todayHijri').textContent = HIJRI;
   $('#todayGregorian').textContent = GREGORIAN ? GREGORIAN + ' م' : '';
   $('#showDate').checked = state.showDate;
@@ -979,12 +990,15 @@
 
   $('#prevBtn').addEventListener('click', () => step(-1));
   $('#nextBtn').addEventListener('click', () => step(1));
-  $('#todayBtn').addEventListener('click', () => { state.filter = 'all'; go(TODAY); });
-  $('#chips').addEventListener('change', (e) => {
-    state.filter = e.target.value;
-    if (!visibleList().includes(current())) go(ORDER.indexOf(visibleList()[0]));
+  $('#todayBtn').addEventListener('click', () => { state.filter = 'all'; state.query = ''; $('#searchInput').value = ''; go(TODAY); });
+  // After a category or search change, stay on the current hadith if it still matches, else show the first match.
+  const showFirstMatch = () => {
+    const list = visibleList();
+    if (list.length && !list.includes(current())) go(ORDER.indexOf(list[0]));
     else render();
-  });
+  };
+  $('#chips').addEventListener('change', (e) => { state.filter = e.target.value; showFirstMatch(); });
+  $('#searchInput').addEventListener('input', (e) => { state.query = e.target.value; showFirstMatch(); });
   document.querySelectorAll('input[name="format"]').forEach((el) => el.addEventListener('change', () => {
     state.format = el.value;
     savePrefs();
