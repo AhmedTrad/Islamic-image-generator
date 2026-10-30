@@ -115,7 +115,12 @@ test('builds card entries with ids and references', () => {
 test('reads and writes the index.html data block', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const list = lib.readCardData(html);
-  assert.equal(list.length, 21);
+  assert.ok(list.length >= 21, 'the 21 hand-written hadiths stay on the card');
+  assert.equal(new Set(list.map((h) => h.id)).size, list.length, 'every id is unique');
+  for (const h of list) {
+    assert.ok(lib.CATEGORY_IDS.includes(h.cat), `${h.id} has a known category`);
+    assert.ok(h.matn && h.source && h.refs && h.narrator, `${h.id} has its text, source, reference and narrator`);
+  }
   const entry = { id: 'test-1', cat: 'iman', matn: 'نصٌّ فيه </script> و$&', source: 's', refs: 'r', narrator: 'n', sharh: '' };
   const updated = lib.writeCardData(html, [...list, entry]);
   assert.deepEqual(lib.readCardData(updated).at(-1), entry);
@@ -137,8 +142,111 @@ test('reads dorar links and ids', () => {
   assert.equal(lib.parseHadithRef('12'), null);
 });
 
+// The shape of https://dorar.net/dorar_api.json?skey=… answers, including its stray closing tags.
+const apiBlock = (n, text, rawi, book, number, grade) => `
+<div class="hadith" style="text-align:justify;">${n} -   ${text}  .</div>
+
+<div class="hadith-info">
+    <span class="info-subtitle">الراوي:</span> ${rawi}</span>
+    <span class="info-subtitle">المحدث:</span> ${book === 'صحيح مسلم' ? 'مسلم' : 'البخاري'}
+    <span class="info-subtitle">المصدر:</span>  ${book}
+    <span class="info-subtitle">الصفحة أو الرقم:</span>  ${number}
+    <span class="info-subtitle">خلاصة حكم المحدث:</span>  <span>${grade}</span>
+</div>`;
+const VOCALIZED = 'مَنْ كانَ يُؤْمِنُ باللَّهِ واليَومِ الآخِرِ فَلْيُكْرِمْ جارَهُ';
+const apiBody = (...blocks) => ({ ahadith: { result: `<head>\n<link rel="canonical" href="https://dorar.net/dorar_api.json">\n</head>${blocks.join('\n')}\n--------------\n<br/><a href="https://dorar.net/hadith/search?q=x">المزيد</a>` } });
+
+test("parses dorar.net's official API answer", () => {
+  const records = lib.parseApiResult(apiBody(
+    apiBlock(1, `<span class="search-keys">مَنْ</span> كانَ يُؤْمِنُ باللَّهِ واليَومِ الآخِرِ فَلْيُكْرِمْ جارَهُ`, '[أبو هريرة]', 'صحيح البخاري', '6019', '[صحيح]'),
+    apiBlock(2, 'نَصٌّ آخَرُ', 'عائشة أم المؤمنين', 'صحيح مسلم', '2594', '[صحيح]'),
+  ));
+  assert.equal(records.length, 2);
+  assert.deepEqual(records[0], {
+    id: null, text: VOCALIZED, rawi: 'أبو هريرة', mohdith: 'البخاري', book: 'صحيح البخاري', number: '6019', grade: 'صحيح', takhrij: '', sharhId: null,
+  });
+  assert.equal(records[1].rawi, 'عائشة أم المؤمنين');
+  assert.deepEqual(lib.parseApiResult({ ahadith: { result: '' } }), []);
+  assert.throws(() => lib.parseApiResult({}), lib.DorarFormatError);
+  assert.equal(lib.apiSearchUrl('النية', 2), 'https://dorar.net/dorar_api.json?skey=%D8%A7%D9%84%D9%86%D9%8A%D8%A9&s[]=6216&s[]=3088&page=2');
+});
+
+test('keeps only complete, vocalized sahih hadiths from al-Bukhari and Muslim that fit the card', () => {
+  const record = (over) => ({ id: null, text: VOCALIZED, rawi: 'أبو هريرة', mohdith: 'البخاري', book: 'صحيح البخاري', number: '6019', grade: 'صحيح', takhrij: '', sharhId: null, ...over });
+  const records = [
+    record(),
+    record({ number: '6019' }), // the same hadith again
+    record({ book: 'صحيح الجامع', text: VOCALIZED + ' أَيْضًا' }),
+    record({ grade: 'أورده في صحيحه وقال : هذا تفسير الأول', number: '1447', text: VOCALIZED + ' كَذَلِكَ' }),
+    record({ number: '1/23', text: VOCALIZED + ' هُنا' }),
+    record({ number: '50', text: 'إنَّما الأعمالُ بالنياتِ . . .' }),
+    record({ number: '51', text: 'نَصٌّ' }),
+    record({ number: '52', text: 'من كان يؤمن بالله واليوم الآخر فليقل خيرا أو ليصمت' }),
+    record({ number: '53', text: 'كانَ النَّبيُّ ﷺ يُصَلِّي مِنَ اللَّيْلِ إحْدَى عَشْرَةَ رَكْعَةً', book: 'صحيح مسلم', mohdith: 'مسلم' }),
+  ];
+  const { entries, skipped } = lib.selectForCard(records, { cat: 'akhlaq', existing: [] });
+  assert.deepEqual(entries.map((e) => e.id), ['bukhari-6019', 'muslim-53']);
+  assert.deepEqual(skipped, {
+    'already on the card': 1,
+    'not al-Bukhari or Muslim': 1,
+    'grade is not plainly sahih': 1,
+    'no hadith number': 1,
+    'abridged text': 1,
+    'too short or too long for the card': 1,
+    'not vocalized enough': 1,
+  });
+  assert.deepEqual(entries[0], { id: 'bukhari-6019', cat: 'akhlaq', matn: VOCALIZED + '.', source: 'صحيح البخاري', refs: 'رقم (6019)', narrator: 'أبو هريرة', sharh: '' });
+  assert.equal(entries[1].lead, false, 'a narration about the Prophet ﷺ gets no «قال رسول الله ﷺ:»');
+
+  const onCard = [{ id: 'bukhari-6019', matn: 'x' }];
+  assert.equal(lib.selectForCard([record()], { cat: 'akhlaq', existing: onCard }).entries.length, 0);
+  const agreedUpon = [{ id: 'bukhari-6018', matn: 'x', refs: 'البخاري (6018)، ومسلم (47)، واللفظ لمسلم' }];
+  assert.deepEqual(lib.referenceIds(agreedUpon[0]), ['bukhari-6018', 'bukhari-6018', 'muslim-47']);
+  assert.equal(lib.selectForCard([record({ book: 'صحيح مسلم', number: '47' })], { cat: 'akhlaq', existing: agreedUpon }).entries.length, 0, 'Muslim 47 is already on the card as bukhari-6018');
+  const withChainNote = record({ number: '60', text: 'مَن أدرَك رَكعةً مِنَ الصَّلاةِ فقد أدرَك الصَّلاةَ. وفي روايةٍ: بمِثلِ حَديثِ يَحيى' });
+  assert.deepEqual(lib.selectForCard([withChainNote], { cat: 'ibadat' }).skipped, { 'includes notes on other chains': 1 });
+});
+
+test("tells the Prophet's own words from accounts about him", () => {
+  assert.equal(lib.isProphetsSaying('إنَّما الأعْمالُ بالنِّيّاتِ'), true);
+  assert.equal(lib.isProphetsSaying('قالَ اللَّهُ تَعالَى: أنا عِنْدَ ظَنِّ عَبْدِي بي'), true, 'a hadith qudsi is still his saying');
+  assert.equal(lib.isProphetsSaying('«الدِّينُ النَّصِيحَةُ»، قُلْنا: لِمَنْ؟'), true);
+  assert.equal(lib.isProphetsSaying('كانَ النبيُّ ﷺ يُصَلِّي'), false);
+  assert.equal(lib.isProphetsSaying('أنَّ رَسولَ اللَّهِ صَلَّى اللهُ عليه وسلَّمَ قالَ: الدِّينُ النَّصِيحَةُ'), false);
+  assert.equal(lib.isProphetsSaying('كُنَّا نُصَلِّي مع'), false);
+  assert.equal(lib.isProphetsSaying('سَأَلْتُ عائِشَةَ'), false);
+  assert.equal(lib.isProphetsSaying('كانَتْ عائشةُ'), false);
+});
+
 test('measures tashkeel and decodes entities', () => {
   assert.ok(lib.tashkeelRatio('بُنِيَ الْإِسْلَامُ عَلَى خَمْسٍ') > 0.8);
   assert.ok(lib.tashkeelRatio('بني الإسلام على خمس') === 0);
   assert.equal(lib.decodeEntities('&#1575;&#x644; &amp; &quot;'), 'ال & "');
+});
+
+test('maps dorar-hadith-api records to the same shape as the parsed pages', () => {
+  const siteFirst = lib.parseSearchPage(searchHtml).results[0];
+  const apiFirst = {
+    hadith: 'إنَّما الأعمالُ بالنِّيَّاتِ، وإنَّما لكلِّ امرئٍ ما نوى', rawi: 'عمر بن الخطاب', mohdith: 'البخاري', mohdithId: '256',
+    book: 'صحيح البخاري', bookId: '6216', numberOrPage: '1', grade: '[صحيح]', explainGrade: '[صحيح]', takhrij: '', hadithId: 'a1b2c3d4',
+    categories: [], hasSharhMetadata: true, sharhMetadata: { id: '8209', isContainSharh: false, urlToGetSharh: '/v1/site/sharh/8209' },
+  };
+  const weak = { ...apiFirst, hadithId: 'e5f6a7b8', grade: '', explainGrade: 'ضعيف', hasSharhMetadata: false, sharhMetadata: undefined };
+  const { total, results } = lib.fromApiSearch({ status: 'success', metadata: { length: 3, total: 3, page: 1 }, data: [apiFirst, weak, { rawi: 'no text' }] });
+  assert.equal(total, 3);
+  assert.equal(results.length, 2, 'records without text are skipped');
+  assert.deepEqual(results[0], siteFirst);
+  assert.equal(results[1].grade, 'ضعيف', 'uses explainGrade when grade is empty');
+  assert.equal(results[1].sharhId, null);
+  assert.equal(lib.fromApiSearch({ data: [], metadata: { numberOfNonSpecialist: 7 } }).total, 7);
+  assert.equal(lib.fromApiHadith({ hadith: '12 - نصٌّ ', numberOrPage: '12' }, 'zz99yy88').id, 'zz99yy88');
+  assert.equal(lib.fromApiHadith({ hadith: '12 - نصٌّ ' }).text, 'نصٌّ');
+  assert.equal(lib.fromApiHadith({ hadith: '- : نصٌّ' }).text, 'نصٌّ');
+  assert.equal(lib.fromApiHadith({ rawi: 'x' }), null);
+  assert.throws(() => lib.fromApiSearch({ status: 'fail', message: 'x' }), lib.DorarFormatError);
+});
+
+test('reads the explanation from a dorar-hadith-api sharh answer', () => {
+  assert.equal(lib.fromApiSharh({ data: { sharhMetadata: { id: '8209', isContainSharh: true, sharh: '  النية  محلها القلب. ' } } }), 'النية محلها القلب.');
+  assert.throws(() => lib.fromApiSharh({ data: { sharhMetadata: { id: '8209', isContainSharh: false } } }), lib.DorarFormatError);
 });
