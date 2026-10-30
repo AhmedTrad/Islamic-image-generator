@@ -113,6 +113,46 @@ export function parseHadithRef(value) {
   return /^[A-Za-z0-9]{4,}$/.test(value) && !/^\d+$/.test(value) ? value : null;
 }
 
+/* ─── dorar-hadith-api JSON ───
+   Answers from the /v1/site/… endpoints of https://github.com/AhmedElTabarani/dorar-hadith-api, mapped to the
+   same records parseSearchPage and parseHadithPage produce. */
+
+const apiText = (value) => (typeof value === 'string' ? squash(value) : '');
+
+// One hadith object as the API sends it in search results, similar lists or GET /v1/site/hadith/:id.
+export function fromApiHadith(item, fallbackId = null) {
+  if (!item || typeof item !== 'object' || typeof item.hadith !== 'string') return null;
+  const text = squash(item.hadith).replace(/^\d+\s*-\s*/, '').replace(/^-\s*:?\s*/, '');
+  if (!text) return null;
+  const sharhId = item.sharhMetadata?.id;
+  return {
+    id: apiText(item.hadithId) || fallbackId,
+    text,
+    rawi: apiText(item.rawi),
+    mohdith: apiText(item.mohdith),
+    book: apiText(item.book),
+    number: apiText(item.numberOrPage),
+    grade: apiText(item.grade || item.explainGrade).replace(/[[\]]/g, '').trim(),
+    takhrij: apiText(item.takhrij),
+    sharhId: sharhId && String(sharhId) !== '0' ? String(sharhId) : null,
+  };
+}
+
+// GET /v1/site/hadith/search?value=…
+export function fromApiSearch(body) {
+  if (!Array.isArray(body?.data)) throw new DorarFormatError('dorar-hadith-api answered without a result list.');
+  const meta = body.metadata || {};
+  const total = Number(meta.total ?? meta.numberOfNonSpecialist ?? meta.length) || body.data.length;
+  return { total, results: body.data.map((item) => fromApiHadith(item)).filter(Boolean) };
+}
+
+// GET /v1/site/sharh/:id
+export function fromApiSharh(body) {
+  const sharh = body?.data?.sharhMetadata?.sharh;
+  if (typeof sharh !== 'string' || !sharh.trim()) throw new DorarFormatError('dorar-hadith-api answered without the explanation text.');
+  return squash(sharh);
+}
+
 /* ─── Rules ─── */
 
 const bookSlug = (book) => BOOKS.find(([name]) => book.includes(name))?.[1] || null;

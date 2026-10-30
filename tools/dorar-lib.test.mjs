@@ -142,3 +142,30 @@ test('measures tashkeel and decodes entities', () => {
   assert.ok(lib.tashkeelRatio('بني الإسلام على خمس') === 0);
   assert.equal(lib.decodeEntities('&#1575;&#x644; &amp; &quot;'), 'ال & "');
 });
+
+test('maps dorar-hadith-api records to the same shape as the parsed pages', () => {
+  const siteFirst = lib.parseSearchPage(searchHtml).results[0];
+  const apiFirst = {
+    hadith: 'إنَّما الأعمالُ بالنِّيَّاتِ، وإنَّما لكلِّ امرئٍ ما نوى', rawi: 'عمر بن الخطاب', mohdith: 'البخاري', mohdithId: '256',
+    book: 'صحيح البخاري', bookId: '6216', numberOrPage: '1', grade: '[صحيح]', explainGrade: '[صحيح]', takhrij: '', hadithId: 'a1b2c3d4',
+    categories: [], hasSharhMetadata: true, sharhMetadata: { id: '8209', isContainSharh: false, urlToGetSharh: '/v1/site/sharh/8209' },
+  };
+  const weak = { ...apiFirst, hadithId: 'e5f6a7b8', grade: '', explainGrade: 'ضعيف', hasSharhMetadata: false, sharhMetadata: undefined };
+  const { total, results } = lib.fromApiSearch({ status: 'success', metadata: { length: 3, total: 3, page: 1 }, data: [apiFirst, weak, { rawi: 'no text' }] });
+  assert.equal(total, 3);
+  assert.equal(results.length, 2, 'records without text are skipped');
+  assert.deepEqual(results[0], siteFirst);
+  assert.equal(results[1].grade, 'ضعيف', 'uses explainGrade when grade is empty');
+  assert.equal(results[1].sharhId, null);
+  assert.equal(lib.fromApiSearch({ data: [], metadata: { numberOfNonSpecialist: 7 } }).total, 7);
+  assert.equal(lib.fromApiHadith({ hadith: '12 - نصٌّ ', numberOrPage: '12' }, 'zz99yy88').id, 'zz99yy88');
+  assert.equal(lib.fromApiHadith({ hadith: '12 - نصٌّ ' }).text, 'نصٌّ');
+  assert.equal(lib.fromApiHadith({ hadith: '- : نصٌّ' }).text, 'نصٌّ');
+  assert.equal(lib.fromApiHadith({ rawi: 'x' }), null);
+  assert.throws(() => lib.fromApiSearch({ status: 'fail', message: 'x' }), lib.DorarFormatError);
+});
+
+test('reads the explanation from a dorar-hadith-api sharh answer', () => {
+  assert.equal(lib.fromApiSharh({ data: { sharhMetadata: { id: '8209', isContainSharh: true, sharh: '  النية  محلها القلب. ' } } }), 'النية محلها القلب.');
+  assert.throws(() => lib.fromApiSharh({ data: { sharhMetadata: { id: '8209', isContainSharh: false } } }), lib.DorarFormatError);
+});

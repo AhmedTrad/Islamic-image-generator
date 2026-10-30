@@ -4,33 +4,43 @@
      npm run dorar -- search "إنما الأعمال بالنيات" [--page 2] [--any-book]
      npm run dorar -- add <result number | dorar.net/h/… link> --cat <ibadat|akhlaq|iman|dhikr> [--dry-run] [--force] [--any-book]
 
-   Requests are sent one at a time with a pause between them, and pages are cached for a day
-   in tools/.cache. If dorar.net refuses a request the tool stops; it never tries to get around a block. */
+   Hadiths are read straight from dorar.net's pages. With --api <url> or DORAR_API_URL they come from a
+   dorar-hadith-api server you run (https://github.com/AhmedElTabarani/dorar-hadith-api) instead.
+   Answers are cached for a day in tools/.cache. Requests to dorar.net go one at a time with a pause between
+   them; if dorar.net refuses a request the tool stops and never tries to get around a block. */
 
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as lib from './dorar-lib.mjs';
+import { ApiUnreachableError, chooseSource } from './dorar-sources.mjs';
 
 const CARD = fileURLToPath(new URL('../index.html', import.meta.url));
-const CACHE_DIR = fileURLToPath(new URL('./.cache/', import.meta.url));
+const CACHE_DIR = process.env.DORAR_CACHE_DIR || fileURLToPath(new URL('./.cache/', import.meta.url));
 const LAST_SEARCH = path.join(CACHE_DIR, 'last-search.json');
 const CACHE_HOURS = 24;
 const REQUEST_GAP_MS = 1500;
+const SITE_TIMEOUT_MS = 20000;
+const API_TIMEOUT_MS = 65000; // the API itself waits up to 60 s for dorar.net (its EXPRESS_TIMEOUT)
 const USER_AGENT = 'IslamicImageGenerator-DorarImport/1.0 (+https://github.com/AhmedTrad/Islamic-image-generator)';
 
 const HELP = `Import authentic hadiths from dorar.net into the Hadith card (index.html).
 
   npm run dorar -- search "<words from the hadith>" [--page <n>] [--any-book]
-      Lists dorar.net results. ✓ marks a sahih hadith from one of the main collections.
+      Lists Dorar's results. ✓ marks a sahih hadith from one of the main collections.
 
   npm run dorar -- add <result number | dorar.net/h/… link> --cat <${lib.CATEGORY_IDS.join('|')}>
       Adds a hadith (with Dorar's grade, source and a benefit from its explanation) to the card.
       --dry-run   show the entry without changing index.html
       --force     add it even if it isn't sahih or isn't from a main collection
       --any-book  accept sahih hadiths from any book, not only the main collections
-      --card <path>  use another copy of the card page`;
+      --card <path>  use another copy of the card page
+
+  Source (both commands):
+      By default the tool reads dorar.net's pages directly.
+      --api <url>   go through the dorar-hadith-api server at this address instead (or set DORAR_API_URL)
+      --direct      read dorar.net directly even when DORAR_API_URL is set`;
 
 class UsageError extends Error {}
 
@@ -40,61 +50,106 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { args._.push(arg); continue; }
     const key = arg.slice(2);
-    if (['page', 'cat', 'card'].includes(key)) args[key] = argv[++i];
+    if (['page', 'cat', 'card', 'api'].includes(key)) args[key] = argv[++i];
     else args[key] = true;
   }
   return args;
 }
 
+/* ─── HTTP with a day's cache ─── */
+
 let lastRequestAt = 0;
-async function fetchPage(url) {
-  const cacheFile = path.join(CACHE_DIR, createHash('sha1').update(url).digest('hex') + '.html');
+async function cachedGet(url, { accept, ext, polite, timeoutMs }) {
+  const cacheFile = path.join(CACHE_DIR, createHash('sha1').update(url).digest('hex') + ext);
   try {
-    if (Date.now() - (await stat(cacheFile)).mtimeMs < CACHE_HOURS * 3600e3) return await readFile(cacheFile, 'utf8');
+    if (Date.now() - (await stat(cacheFile)).mtimeMs < CACHE_HOURS * 3600e3) return { cached: true, text: await readFile(cacheFile, 'utf8') };
   } catch { /* not cached yet */ }
 
-  const wait = lastRequestAt + REQUEST_GAP_MS - Date.now();
-  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-  lastRequestAt = Date.now();
+  if (polite) {
+    const wait = lastRequestAt + REQUEST_GAP_MS - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    lastRequestAt = Date.now();
+  }
 
-  let response;
+  const response = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT, Accept: accept, 'Accept-Language': 'ar,en;q=0.8' },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const text = await response.text();
+  if (response.ok) {
+    await mkdir(CACHE_DIR, { recursive: true });
+    await writeFile(cacheFile, text);
+  }
+  return { cached: false, ok: response.ok, status: response.status, text };
+}
+
+// dorar.net pages.
+async function fetchPage(url) {
+  let result;
   try {
-    response = await fetch(url, {
-      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html', 'Accept-Language': 'ar,en;q=0.8' },
-      signal: AbortSignal.timeout(20000),
-    });
+    result = await cachedGet(url, { accept: 'text/html', ext: '.html', polite: true, timeoutMs: SITE_TIMEOUT_MS });
   } catch (err) {
     throw new Error(`Couldn't reach dorar.net (${err.cause?.code || err.name}). Check your internet connection and try again.`);
   }
-  if (response.status === 403) {
+  if (result.cached || result.ok) return result.text;
+  if (result.status === 403) {
     throw new Error('dorar.net refused the request (HTTP 403). This tool does not try to get around that: run it from a normal home connection, or ask Dorar for access.');
   }
-  if (response.status === 429) throw new Error('dorar.net asked for fewer requests (HTTP 429). Wait a while before trying again.');
-  if (!response.ok) throw new Error(`dorar.net answered HTTP ${response.status} for ${url}`);
-
-  const html = await response.text();
-  await mkdir(CACHE_DIR, { recursive: true });
-  await writeFile(cacheFile, html);
-  return html;
+  if (result.status === 429) throw new Error('dorar.net asked for fewer requests (HTTP 429). Wait a while before trying again.');
+  throw new Error(`dorar.net answered HTTP ${result.status} for ${url}`);
 }
+
+// dorar-hadith-api answers: { status, metadata, data } on success, { status, message } on failure.
+async function fetchJson(url) {
+  let result;
+  try {
+    result = await cachedGet(url, { accept: 'application/json', ext: '.json', polite: false, timeoutMs: API_TIMEOUT_MS });
+  } catch (err) {
+    throw new ApiUnreachableError(`no dorar-hadith-api answered at ${new URL(url).origin} (${err.cause?.code || err.name})`);
+  }
+  let body = null;
+  try { body = JSON.parse(result.text); } catch { /* reported below */ }
+  if (result.cached || result.ok) {
+    if (body === null || typeof body !== 'object') throw new lib.DorarFormatError(`dorar-hadith-api sent something other than JSON for ${url}`);
+    return body;
+  }
+  const message = body?.message || result.text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160) || `HTTP ${result.status}`;
+  if (result.status === 429) {
+    throw new Error(`dorar-hadith-api has used up its request allowance (${message}). It allows 100 requests a day per IP unless RATE_LIMIT_MAX in its .env says otherwise.`);
+  }
+  if (result.status === 404) throw new Error(`dorar-hadith-api: ${message}.`);
+  if (result.status === 408 || result.status >= 500) {
+    throw new Error(`dorar-hadith-api couldn't get the page from dorar.net (${message}). If dorar.net answers it with HTTP 403, see «Fetching through dorar-hadith-api» in the README.`);
+  }
+  throw new Error(`dorar-hadith-api answered HTTP ${result.status}: ${message}`);
+}
+
+function pickSource(args) {
+  try {
+    return chooseSource({ api: args.api, direct: args.direct, envUrl: process.env.DORAR_API_URL, fetchHtml: fetchPage, fetchJson });
+  } catch (err) {
+    throw new UsageError(err.message);
+  }
+}
+
+/* ─── Commands ─── */
 
 const oneLine = (text, max = 110) => (text.length > max ? text.slice(0, max) + '…' : text);
 
-async function search(args) {
+async function search(args, source) {
   const query = args._.slice(1).join(' ').trim();
   if (!query) throw new UsageError('Give some words from the hadith, e.g.  npm run dorar -- search "إنما الأعمال بالنيات"');
   const page = Math.max(1, Number(args.page) || 1);
-  const url = `${lib.DORAR}/hadith/search?q=${encodeURIComponent(query)}${page > 1 ? `&page=${page}` : ''}`;
-  const { total, results } = lib.parseSearchPage(await fetchPage(url));
+  const { total, results } = await source.search(query, page);
 
   await mkdir(CACHE_DIR, { recursive: true });
-  await writeFile(LAST_SEARCH, JSON.stringify({ query, page, results }, null, 2));
+  await writeFile(LAST_SEARCH, JSON.stringify({ query, page, source: source.name, results }, null, 2));
 
   if (!results.length) {
-    console.log(`dorar.net has no results for «${query}»${page > 1 ? ` on page ${page}` : ''}.`);
+    console.log(`${source.name} has no results for «${query}»${page > 1 ? ` on page ${page}` : ''}.`);
     return;
   }
-  console.log(`dorar.net · «${query}» · page ${page} · ${results.length} shown of ${total}\n`);
+  console.log(`${source.name} · «${query}» · page ${page} · ${results.length} shown of ${total}\n`);
   results.forEach((h, i) => {
     const verdict = lib.assess(h, { anyBook: args['any-book'] });
     console.log(`${String(i + 1).padStart(2)}  ${verdict.ok ? '✓' : '✗'}  ${h.book} ${h.number} · ${h.mohdith} · ${h.grade} · ${h.rawi}${h.sharhId ? ' · شرح' : ''}`);
@@ -116,7 +171,7 @@ async function loadFromLastSearch(number) {
   return hadith;
 }
 
-async function add(args) {
+async function add(args, source) {
   const ref = args._[1];
   if (!ref) throw new UsageError('Say which hadith to add: a result number from the last search, or a dorar.net/h/… link.');
   if (!lib.CATEGORY_IDS.includes(args.cat)) throw new UsageError(`Choose a category with --cat ${lib.CATEGORY_IDS.join('|')}.`);
@@ -127,7 +182,7 @@ async function add(args) {
   } else {
     const dorarId = lib.parseHadithRef(ref);
     if (!dorarId) throw new UsageError(`«${ref}» is neither a result number nor a dorar.net/h/… link.`);
-    hadith = lib.parseHadithPage(await fetchPage(`${lib.DORAR}/h/${dorarId}`), dorarId);
+    hadith = await source.hadith(dorarId);
   }
 
   const verdict = lib.assess(hadith, { anyBook: args['any-book'] });
@@ -139,9 +194,7 @@ async function add(args) {
   const duplicate = lib.findDuplicate(list, lib.toCardEntry(hadith, { cat: args.cat, sharh: null }));
   if (duplicate) throw new UsageError(`This hadith is already on the card as «${duplicate.id}».`);
 
-  const sharh = hadith.sharhId
-    ? lib.benefitFromSharh(lib.parseSharhPage(await fetchPage(`${lib.DORAR}/hadith/sharh/${hadith.sharhId}`)))
-    : null;
+  const sharh = hadith.sharhId ? lib.benefitFromSharh(await source.sharh(hadith.sharhId)) : null;
   const entry = lib.toCardEntry(hadith, { cat: args.cat, sharh });
 
   const notes = [];
@@ -149,7 +202,7 @@ async function add(args) {
   if (ratio < 0.6) notes.push(`The matn is only partly vocalized (${Math.round(ratio * 100)}% of letters have tashkeel); the card style calls for full tashkeel.`);
   if (entry.matn.length > 320) notes.push('The matn is long, so the card will set it in a smaller size.');
   if (!sharh) notes.push('Dorar has no explanation for this hadith, so الفائدة is empty and the card hides it. Write one before publishing.');
-  else if (!sharh.fromLessons) notes.push('الفائدة was taken from the opening of Dorar\'s explanation; check that it reads well on its own.');
+  else if (!sharh.fromLessons) notes.push("الفائدة was taken from the opening of Dorar's explanation; check that it reads well on its own.");
 
   console.log(JSON.stringify(entry, null, 2));
   for (const note of notes) console.log('note: ' + note);
@@ -170,8 +223,11 @@ if (!command || args.help) {
   console.log(HELP);
   process.exit(command || args.help ? 0 : 1);
 }
-command(args).catch((err) => {
-  console.error('Error: ' + err.message);
-  if (err instanceof lib.DorarFormatError) console.error('dorar.net may have changed its page layout; tools/dorar-lib.mjs needs updating.');
-  process.exit(1);
-});
+Promise.resolve()
+  .then(() => command(args, pickSource(args)))
+  .catch((err) => {
+    console.error('Error: ' + err.message);
+    if (err instanceof ApiUnreachableError) console.error('Start the dorar-hadith-api server (see README) or check the address. Without --api and DORAR_API_URL the tool reads dorar.net directly.');
+    if (err instanceof lib.DorarFormatError) console.error('dorar.net or dorar-hadith-api may have changed its output; tools/dorar-lib.mjs needs updating.');
+    process.exit(1);
+  });
