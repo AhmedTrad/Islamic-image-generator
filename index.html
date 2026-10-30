@@ -1023,11 +1023,14 @@
   const fontsLoaded = document.fonts
     ? Promise.all(['400 30px Amiri', '500 14px "Readex Pro"'].map((spec) => document.fonts.load(spec, 'بسم ﷺ'))).catch(() => null)
     : Promise.resolve();
-  Promise.all([tailwindApplied(), fontsLoaded]).then(() => {
+  const ready = Promise.all([tailwindApplied(), fontsLoaded]).then(() => {
     fontsReady = true;
     render();
     if (document.fonts) document.fonts.addEventListener('loadingdone', render);
   });
+
+  // For tools/render-card.mjs, which renders and posts the daily card from a headless browser.
+  window.hadithCard = { ready, current, text: hadithText, renderPNG };
 })();
 </script>
 </body>

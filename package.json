@@ -4,12 +4,17 @@
   "description": "Arabic-inspired text-to-image generator and daily Hadith card",
   "scripts": {
     "dorar": "node tools/dorar.mjs",
-    "test": "node --test tools/*.test.mjs"
+    "test": "node --test tools/*.test.mjs",
+    "render": "node tools/render-card.mjs",
+    "post": "node tools/post-daily.mjs",
+    "pinterest:auth": "node tools/pinterest-auth.mjs",
+    "pin": "node tools/post-make.mjs"
   },
   "dependencies": {
-    "linkedom": "0.18.13"
+    "linkedom": "0.18.13",
+    "puppeteer-core": "25.16.0"
   },
   "engines": {
-    "node": ">=18.17"
+    "node": ">=22.12"
   }
 }

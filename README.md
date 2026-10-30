@@ -8,8 +8,17 @@ Daily Hadith cards, plus an Arabic-inspired text-to-image studio with ornamental
 islamic-image-generator/
 ├── index.html          # Main page: daily Hadith card (standalone, single file)
 ├── studio.html         # Text-to-image studio (React app)
-├── package.json        # Node tooling for the dorar.net importer
+├── package.json        # Node tooling: dorar.net importer, card renderer, Pinterest poster
+├── .github/workflows/
+│   └── daily-pin.yml           # Sends the day's card to Pinterest through Make at 06:00 Paris time
 ├── tools/
+│   ├── render-card.mjs         # Renders the card to a PNG in headless Chrome
+│   ├── post-make.mjs           # Prepares the day's Pin and sends it to Make (run by the workflow)
+│   ├── post-make.test.mjs      # Make webhook tests against a stand-in server
+│   ├── post-daily.mjs          # Pins through Pinterest's own API, for an approved API app
+│   ├── pinterest.mjs           # Pinterest API v5: tokens, duplicate check, Pin creation, Pin text
+│   ├── pinterest-auth.mjs      # One-time Pinterest API sign-in; saves the GitHub secrets
+│   ├── pinterest.test.mjs      # Pinterest API tests against a stand-in server
 │   ├── dorar.mjs               # CLI: search dorar.net, add hadiths to the card
 │   ├── dorar-sources.mjs       # Where hadiths come from: dorar-hadith-api or dorar.net pages
 │   ├── dorar-lib.mjs           # Page and JSON parsing, authenticity checks, card data block
@@ -89,6 +98,74 @@ It listens on <http://localhost:5000>. Point the importer at it with `--api http
 
 The Dart package [dorar_hadith](https://pub.dev/packages/dorar_hadith) reads the same site for Dart and Flutter apps. The importer doesn't use it because it runs on Node.js.
 
+## Posting to Pinterest every day
+
+[`.github/workflows/daily-pin.yml`](.github/workflows/daily-pin.yml) renders the day's card at 06:00 Paris time and sends it to [Make](https://www.make.com), which pins it to your board. Make uses its own approved Pinterest connection, so you don't need a Pinterest developer app. The Pin's description is the hadith, its reference, narrator and الفائدة. It all runs in the cloud, so your computer can be off.
+
+Each day the workflow publishes the card on the `daily-pin` branch of this repository. That branch only ever holds the latest card, and it gives the image the public address Pinterest needs to fetch it.
+
+`npm run render` renders the card on your own computer, into `out/`. It uses your installed Chrome or Edge.
+
+### 1. Create the Make scenario
+
+1. Sign up at [make.com](https://www.make.com). The free plan is enough: each day uses a few operations.
+2. Create a scenario. Its first module is **Webhooks → Custom webhook**. Add a webhook and copy its address.
+3. Store the address as a secret of this repository. This needs the [GitHub CLI](https://cli.github.com), signed in with `gh auth login`:
+
+   ```bash
+   gh secret set MAKE_WEBHOOK_URL
+   ```
+
+### 2. Show Make what the job sends
+
+The schedule only runs from the default branch, so merge the workflow into `main` first.
+
+1. In the webhook module, choose to redetermine the data structure, so Make waits for a sample.
+2. Run the workflow once:
+
+   ```bash
+   gh workflow run daily-pin.yml
+   ```
+
+Make then knows these fields: `title`, `description`, `alt_text`, `link`, `image_url`, plus `id` and `date`.
+
+### 3. Pin it
+
+1. Add **Pinterest → Create a Pin** after the webhook. Connect your Pinterest account and choose the board.
+2. Map the webhook's `title`, `description`, `link` and `alt_text` to the Pin fields with the same names. Map `image_url` to the Pin's image address.
+3. Optional: add **Webhooks → Webhook response** after it, with the body `{"id": "…"}` holding the new Pin's id. The job's log then shows each Pin's address. Without it, Make answers "Accepted" and the job can't confirm the Pin.
+4. Save the scenario and switch it on, set to run as soon as data arrives.
+
+The sample run counted as today's post, so send today's card again:
+
+```bash
+gh workflow run daily-pin.yml -f force=true
+```
+
+### Optional settings
+
+Set these as repository variables with `gh variable set <name> --body "<value>"`.
+
+| Variable | Effect |
+| --- | --- |
+| `PIN_LINK` | Address the Pin links to. The hadith id is added as `#id`. |
+| `CAPTION_FOOTER` | Text after the description, such as hashtags. |
+| `CARD_CREDIT` | Replaces the credit line at the bottom of the card. |
+| `CARD_SHOW_DATE` | `true` prints the Hijri date on the card. It is left off by default because a Pin keeps circulating for months. |
+
+### Good to know
+
+- A second run on the same day doesn't send the same card twice. Run the workflow with `force` to send it again.
+- Each run keeps the card and the Pin text for 14 days as an artifact.
+- If Make answers "Accepted" but no Pin appears, the scenario is probably off. Make queues the data until you switch it on. Check the scenario's history in Make.
+- GitHub can start scheduled runs a few minutes late when it is busy.
+- GitHub turns off scheduled workflows in a public repository after 60 days without activity. It emails you first, and you can turn it back on from the Actions tab.
+- The card holds 21 hadiths, so the same Pin returns every 21 days. Add more with `npm run dorar`.
+
+### Posting through Pinterest's API instead
+
+If Pinterest later approves a developer app, `npm run pinterest:auth` signs in once and `npm run post` pins through Pinterest's API directly. The settings are listed at the top of [tools/post-daily.mjs](tools/post-daily.mjs). The workflow would then need to call that script instead of the Make steps.
+
 ## Running the App
 
 The Hadith card (`index.html`) works when opened directly in a browser. The studio (`studio.html`) does not: Babel loads `assets/js/app.js` over HTTP, so serve the project through a local server to use both.
@@ -120,3 +197,4 @@ npx serve .
 | React, ReactDOM, Babel (studio) | ✅ Local (`assets/lib/`) |
 | Tailwind CSS | 🌐 CDN |
 | Arabic fonts (Amiri, Readex Pro, Scheherazade New, Noto Naskh Arabic) | 🌐 Google Fonts |
+| Chrome or Edge (`npm run render`, `npm run post`) | 💻 Installed browser |

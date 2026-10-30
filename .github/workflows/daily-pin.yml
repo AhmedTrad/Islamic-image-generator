@@ -1,0 +1,121 @@
+name: Daily Hadith Pin
+
+# Renders the day's Hadith card (index.html) at 06:00 Paris time and has Make (make.com) pin it to Pinterest.
+# The image is published on the daily-pin branch, which only ever holds the latest card, so Pinterest can fetch it.
+# Setup: «Posting to Pinterest every day» in README.md.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+      timezone: Europe/Paris
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Send the card again even if today's was already sent
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # pushes the day's image to the daily-pin branch
+
+concurrency:
+  group: daily-pin
+  cancel-in-progress: false
+
+env:
+  CARD_TIMEZONE: Europe/Paris
+  PIN_BRANCH: daily-pin
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check whether today's card was already sent
+        id: guard
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          today=$(TZ="$CARD_TIMEZONE" date +%F)
+          sent=""
+          if git fetch --quiet --depth=1 origin "$PIN_BRANCH" 2>/dev/null; then
+            sent=$(git show FETCH_HEAD:sent.txt 2>/dev/null || true)
+          fi
+          if [ "$sent" = "$today" ] && [ "$FORCE" != "true" ]; then
+            echo "Today's card ($today) was already sent to Make. Run the workflow with force to send it again."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v7
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - if: steps.guard.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Render today's card
+        id: card
+        if: steps.guard.outputs.skip != 'true'
+        run: node tools/post-make.mjs prepare --out out
+        env:
+          CARD_CREDIT: ${{ vars.CARD_CREDIT }}
+          CARD_SHOW_DATE: ${{ vars.CARD_SHOW_DATE }}
+          CAPTION_FOOTER: ${{ vars.CAPTION_FOOTER }}
+          PIN_LINK: ${{ vars.PIN_LINK }}
+
+      # One commit holding only today's image, force-pushed, so the branch never grows.
+      - name: Publish the image
+        id: publish
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          NAME: ${{ steps.card.outputs.name }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          blob=$(git hash-object -w out/pin.png)
+          tree=$(printf '100644 blob %s\t%s\n' "$blob" "$NAME" | git mktree)
+          commit=$(git commit-tree "$tree" -m "Card for $NAME")
+          git push --force --quiet origin "$commit:refs/heads/$PIN_BRANCH"
+          {
+            echo "blob=$blob"
+            echo "commit=$commit"
+            echo "image_url=https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$PIN_BRANCH/$NAME"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send the Pin to Make
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
+          IMAGE_URL: ${{ steps.publish.outputs.image_url }}
+        run: node tools/post-make.mjs send --out out --image-url "$IMAGE_URL"
+
+      - name: Record that today's card was sent
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          NAME: ${{ steps.card.outputs.name }}
+          DATE: ${{ steps.card.outputs.date }}
+          BLOB: ${{ steps.publish.outputs.blob }}
+          PARENT: ${{ steps.publish.outputs.commit }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          sent=$(printf '%s\n' "$DATE" | git hash-object -w --stdin)
+          tree=$(printf '100644 blob %s\t%s\n100644 blob %s\tsent.txt\n' "$BLOB" "$NAME" "$sent" | git mktree)
+          commit=$(git commit-tree "$tree" -p "$PARENT" -m "Sent $NAME to Make")
+          git push --force --quiet origin "$commit:refs/heads/$PIN_BRANCH"
+
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.guard.outputs.skip != 'true'
+        with:
+          name: hadith-card-${{ github.run_id }}
+          path: out/
+          retention-days: 14
+          if-no-files-found: ignore
