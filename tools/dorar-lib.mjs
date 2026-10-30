@@ -153,6 +153,109 @@ export function fromApiSharh(body) {
   return squash(sharh);
 }
 
+/* ─── dorar.net's official API ───
+   https://dorar.net/dorar_api.json?skey=… (dorar.net/article/389) answers { ahadith: { result: "<html>" } }.
+   Each hadith is a <div class="hadith"> followed by a <div class="hadith-info"> of «label: value» pairs.
+   It has no ids, explanations or categories. */
+
+export const API_BOOKS = { bukhari: '6216', muslim: '3088' };
+
+export function apiSearchUrl(query, page = 1) {
+  const books = Object.values(API_BOOKS).map((id) => `&s[]=${id}`).join('');
+  return `https://dorar.net/dorar_api.json?skey=${encodeURIComponent(query)}${books}${page > 1 ? `&page=${page}` : ''}`;
+}
+
+const API_LABELS = Object.fromEntries(Object.entries(LABELS).map(([key, label]) => [label, key]));
+const unbracket = (s) => s.replace(/^\[(.*)\]$/, '$1').trim();
+
+export function parseApiResult(body) {
+  const html = body?.ahadith?.result;
+  if (typeof html !== 'string') throw new DorarFormatError("dorar.net's API answered without a result list.");
+  const doc = parseDocument(`<html><body>${html}</body></html>`);
+  const records = [];
+  for (const info of doc.querySelectorAll('.hadith-info')) {
+    const textNode = info.previousElementSibling;
+    if (!textNode || !textNode.classList.contains('hadith')) continue;
+    const fields = {};
+    let key = null;
+    for (const node of info.childNodes) {
+      if (node.nodeType === 1 && node.classList.contains('info-subtitle')) {
+        key = API_LABELS[squash(node.textContent).replace(/:$/, '')] || null;
+      } else if (key) {
+        fields[key] = (fields[key] || '') + node.textContent;
+      }
+    }
+    const text = squash(textNode.textContent).replace(/^\d+\s*-\s*/, '').replace(/\s+\.$/, '').trim();
+    if (!text) continue;
+    records.push({
+      id: null,
+      text,
+      rawi: unbracket(squash(fields.rawi || '')),
+      mohdith: squash(fields.mohdith || ''),
+      book: squash(fields.book || ''),
+      number: squash(fields.number || ''),
+      grade: unbracket(squash(fields.grade || '')),
+      takhrij: '',
+      sharhId: null,
+    });
+  }
+  return records;
+}
+
+// The card prints «قال رسول الله ﷺ:» above the text. That is only right when the text is the Prophet's own words,
+// so texts that mention him or open like a companion's account are treated as narrations.
+const PROPHET = /رسول الله|النبي|نبي الله|ﷺ|صلى الله عليه وسلم/;
+const ACCOUNT_OPENING = /^(كان|كانت|كنا|كنت|رأيت|سمعت|جاء|جاءت|أتى|أتيت|خرج|خرجنا|دخل|دخلت|سألت|سئل|قالت|بينما|بينا|لما|أخبرني|حدثني|عن|أن رجلا|أن امرأة|قال رجل|قال لي|قلت)(?=[\s،,:]|$)/; // \b doesn't see Arabic letters as word characters
+export function isProphetsSaying(text) {
+  const plain = stripTashkeel(text).replace(/[«»"]/g, '').trim();
+  return !PROPHET.test(plain) && !ACCOUNT_OPENING.test(plain);
+}
+
+const MIN_CHARS = 20;
+// Texts up to 700 characters fit both card formats at a readable size (checked with npm run check-cards).
+export const MAX_CHARS = 700;
+// Dorar vocalizes the letters that need it, about 0.4 by tashkeelRatio; below 0.3 a text is barely vocalized.
+const MIN_TASHKEEL = 0.3;
+// Muslim's texts sometimes end with notes on other chains («وفي رواية: بمثل حديث يحيى…»), which aren't the hadith's wording.
+const CHAIN_NOTES = /وفي رواية|بمثل حديث|بهذا الإسناد|بهذا الاسناد|حدثنا|أخبرنا|نحو حديث|بإسناده|وزاد في رواية/;
+
+// Every al-Bukhari or Muslim number an entry stands for: its id, plus the numbers in references like «البخاري (8)، ومسلم (16)».
+export function referenceIds(entry) {
+  const ids = [entry.id];
+  for (const [, book, number] of String(entry.refs || '').matchAll(/(البخاري|مسلم) \((\d+)\)/g)) ids.push(`${book === 'مسلم' ? 'muslim' : 'bukhari'}-${number}`);
+  return ids;
+}
+
+// Turns API records into card entries, keeping only complete, vocalized, sahih hadiths from al-Bukhari and
+// Muslim that fit the card and aren't on it yet. Returns the entries and a count of each reason for skipping.
+export function selectForCard(records, { cat, existing = [] }) {
+  const entries = [];
+  const skipped = {};
+  const skip = (reason) => { skipped[reason] = (skipped[reason] || 0) + 1; };
+  const knownIds = new Set(existing.flatMap(referenceIds));
+  for (const record of records) {
+    const slug = bookSlug(record.book);
+    const length = Array.from(record.text).length;
+    if (slug !== 'bukhari' && slug !== 'muslim') skip('not al-Bukhari or Muslim');
+    else if (record.grade !== 'صحيح') skip('grade is not plainly sahih');
+    else if (!/^\d+$/.test(record.number)) skip('no hadith number');
+    else if (/\.\s?\.\s?\.|…/.test(record.text)) skip('abridged text');
+    else if (CHAIN_NOTES.test(stripTashkeel(record.text))) skip('includes notes on other chains');
+    else if (length < MIN_CHARS || length > MAX_CHARS) skip('too short or too long for the card');
+    else if (tashkeelRatio(record.text) < MIN_TASHKEEL) skip('not vocalized enough');
+    else {
+      const entry = toCardEntry(record, { cat, sharh: null });
+      if (!isProphetsSaying(record.text)) entry.lead = false;
+      if (knownIds.has(entry.id) || findDuplicate([...existing, ...entries], entry)) skip('already on the card');
+      else {
+        entries.push(entry);
+        knownIds.add(entry.id);
+      }
+    }
+  }
+  return { entries, skipped };
+}
+
 /* ─── Rules ─── */
 
 const bookSlug = (book) => BOOKS.find(([name]) => book.includes(name))?.[1] || null;

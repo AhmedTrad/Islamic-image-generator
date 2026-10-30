@@ -8,7 +8,8 @@
     "render": "node tools/render-card.mjs",
     "post": "node tools/post-daily.mjs",
     "pinterest:auth": "node tools/pinterest-auth.mjs",
-    "pin": "node tools/post-make.mjs"
+    "pin": "node tools/post-make.mjs",
+    "check-cards": "node tools/check-cards.mjs"
   },
   "dependencies": {
     "linkedom": "0.18.13",

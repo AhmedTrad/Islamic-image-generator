@@ -1,49 +1,45 @@
 # Islamic Image Generator
 
-Daily Hadith cards, plus an Arabic-inspired text-to-image studio with ornamental frames, calligraphy fonts, and live preview.
+Daily Hadith cards from the hadith encyclopedia of [dorar.net](https://dorar.net/hadith), with a daily Pin on Pinterest.
+
+Live site: <https://ahmedtrad.github.io/Islamic-image-generator/>
 
 ## Project Structure
 
 ```
 islamic-image-generator/
-├── index.html          # Main page: daily Hadith card (standalone, single file)
-├── studio.html         # Text-to-image studio (React app)
+├── index.html          # Main page: daily Hadith card and its hadith list (standalone, single file)
+├── PRIVACY.md          # Privacy policy
 ├── package.json        # Node tooling: dorar.net importer, card renderer, Pinterest poster
 ├── .github/workflows/
 │   └── daily-pin.yml           # Sends the day's card to Pinterest through Make at 06:00 Paris time
 ├── tools/
 │   ├── render-card.mjs         # Renders the card to a PNG in headless Chrome
+│   ├── check-cards.mjs         # Checks that every hadith fits the card in both formats
 │   ├── post-make.mjs           # Prepares the day's Pin and sends it to Make (run by the workflow)
 │   ├── post-make.test.mjs      # Make webhook tests against a stand-in server
 │   ├── post-daily.mjs          # Pins through Pinterest's own API, for an approved API app
 │   ├── pinterest.mjs           # Pinterest API v5: tokens, duplicate check, Pin creation, Pin text
 │   ├── pinterest-auth.mjs      # One-time Pinterest API sign-in; saves the GitHub secrets
 │   ├── pinterest.test.mjs      # Pinterest API tests against a stand-in server
-│   ├── dorar.mjs               # CLI: search dorar.net, add hadiths to the card
+│   ├── dorar.mjs               # CLI: search dorar.net, add one hadith or import in bulk
+│   ├── dorar-topics.mjs        # Search words for the bulk import, by card category
 │   ├── dorar-sources.mjs       # Where hadiths come from: dorar-hadith-api or dorar.net pages
 │   ├── dorar-lib.mjs           # Page and JSON parsing, authenticity checks, card data block
 │   ├── dorar-lib.test.mjs      # Parser tests (npm test)
 │   └── dorar-sources.test.mjs  # Source and CLI tests against a stub API server
-├── README.md
-└── assets/             # Studio files
-    ├── css/
-    │   └── styles.css      # Custom styles (scrollbar, range, color inputs)
-    ├── js/
-    │   ├── app.js          # React components & app logic (JSX)
-    │   ├── data.js         # App constants (palette, presets, default settings)
-    │   └── utils.js        # Canvas utilities (text wrapping, image download)
-    ├── lib/
-    │   ├── babel.min.js    # In-browser JSX transform
-    │   ├── react-dom.development.js
-    │   └── react.development.js
-    └── img/                # Place any image assets here
+└── README.md
 ```
 
 ## Daily Hadith Card (`index.html`)
 
-A self-contained page that renders a minimalist card for an authentic (صحيح) hadith and exports it as a PNG. It links to the studio for free-text cards.
+A self-contained page that renders a minimalist card for an authentic (صحيح) hadith and exports it as a PNG.
 
-- **Content:** 21 narrations from Sahih al-Bukhari, Sahih Muslim and Jami' at-Tirmidhi (graded حسن صحيح), each with full tashkeel, takhrij (collection and number, plus «واللفظ لـ…» where the two Sahihs differ), narrator, and a one-line benefit (الفائدة).
+- **Content:** 881 sahih hadiths.
+  - 21 were written by hand from Sahih al-Bukhari, Sahih Muslim and Jami' at-Tirmidhi. Each has full tashkeel, takhrij with «واللفظ لـ…» where the two Sahihs differ, and a one-line benefit (الفائدة).
+  - 860 come from al-Bukhari and Muslim through dorar.net's official API (`npm run dorar -- bulk`). They keep dorar's own vocalization. The API has no explanations, so these cards have no الفائدة.
+- **Narrations:** «قال رسول الله ﷺ:» is printed only above the Prophet's own words. A text that tells what he did, or quotes him inside a companion's account, appears without it.
+- **Search:** the box under the arrows finds hadiths by words from the text, the narrator or the book. It ignores tashkeel and the different forms of alif.
 - **Categories:** العبادات والأركان · مكارم الأخلاق · الإيمان والإخلاص · الأذكار وفضائل الأعمال. The daily pick rotates through them by date, so consecutive days change theme.
 - **Formats:** square 1080 × 1080 and landscape 1200 × 900. The matn font size is fitted automatically so long narrations never overflow.
 - **Export:** "تنزيل الصورة" paints the laid-out card onto a canvas word by word, so Arabic shaping, tashkeel and the web fonts (Amiri, Readex Pro) match the preview.
@@ -68,6 +64,16 @@ npm run dorar -- search "إنما الأعمال بالنيات"
 ```bash
 npm run dorar -- add 1 --cat iman
 ```
+
+To import many hadiths at once:
+
+```bash
+npm run dorar -- bulk
+```
+
+- **bulk** searches dorar.net's [official API](https://dorar.net/article/389) for each topic in `tools/dorar-topics.mjs`, two pages of 15 results each, limited to Sahih al-Bukhari and Sahih Muslim. It sends about 100 requests, paced and cached like the other commands.
+- **What bulk keeps:** hadiths graded plainly «صحيح» with a hadith number, complete rather than abridged with «...», free of notes on other chains, at least partly vocalized, at most 700 characters, and not on the card yet. That includes hadiths already there under their other book's number.
+- **After a bulk import,** `npm run check-cards` lays out every hadith in Chrome and confirms it fits the card in both formats.
 
 - **search** lists Dorar's results with the source book and number, the grading scholar, the grade and the narrator. ✓ marks a sahih hadith from one of the main collections (al-Bukhari, Muslim, Abu Dawud, at-Tirmidhi, an-Nasa'i, Ibn Majah, Riyad as-Salihin).
 - **add** takes a result number from the last search, or a `dorar.net/h/…` link. It refuses weak or non-sahih hadiths unless you pass `--force`, and refuses hadiths already on the card. It fills `source`, `refs` and `narrator` from Dorar. It takes `sharh` from the «وفي الحديث» lessons in Dorar's explanation and credits it on the card as «من شرح الدرر السنية».
@@ -160,7 +166,7 @@ Set these as repository variables with `gh variable set <name> --body "<value>"`
 - If Make answers "Accepted" but no Pin appears, the scenario is probably off. Make queues the data until you switch it on. Check the scenario's history in Make.
 - GitHub can start scheduled runs a few minutes late when it is busy.
 - GitHub turns off scheduled workflows in a public repository after 60 days without activity. It emails you first, and you can turn it back on from the Actions tab.
-- The card holds 21 hadiths, so the same Pin returns every 21 days. Add more with `npm run dorar`.
+- The card holds 881 hadiths, so the daily Pin doesn't repeat for about two and a half years. Add more with `npm run dorar`.
 
 ### Posting through Pinterest's API instead
 
@@ -168,33 +174,12 @@ If Pinterest later approves a developer app, `npm run pinterest:auth` signs in o
 
 ## Running the App
 
-The Hadith card (`index.html`) works when opened directly in a browser. The studio (`studio.html`) does not: Babel loads `assets/js/app.js` over HTTP, so serve the project through a local server to use both.
-
-### Option 1 — Python (no install needed)
-
-```bash
-cd islamic-image-generator
-python -m http.server 5500
-```
-
-Then open <http://localhost:5500> for the Hadith card, or <http://localhost:5500/studio.html> for the studio.
-
-### Option 2 — VS Code Live Server extension
-
-1. Install the **Live Server** extension in VS Code.  
-2. Right-click `index.html` → **Open with Live Server**.
-
-### Option 3 — Node.js `serve`
-
-```bash
-npx serve .
-```
+Open `index.html` directly in a browser, or use the live site. GitHub Pages publishes the main branch at <https://ahmedtrad.github.io/Islamic-image-generator/> and updates it after every push.
 
 ## Internet Requirements
 
 | Resource | Required? |
 |---|---|
-| React, ReactDOM, Babel (studio) | ✅ Local (`assets/lib/`) |
 | Tailwind CSS | 🌐 CDN |
-| Arabic fonts (Amiri, Readex Pro, Scheherazade New, Noto Naskh Arabic) | 🌐 Google Fonts |
+| Arabic fonts (Amiri, Readex Pro) | 🌐 Google Fonts |
 | Chrome or Edge (`npm run render`, `npm run post`) | 💻 Installed browser |

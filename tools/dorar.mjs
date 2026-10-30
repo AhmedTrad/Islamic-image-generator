@@ -3,8 +3,11 @@
 
      npm run dorar -- search "إنما الأعمال بالنيات" [--page 2] [--any-book]
      npm run dorar -- add <result number | dorar.net/h/… link> --cat <ibadat|akhlaq|iman|dhikr> [--dry-run] [--force] [--any-book]
+     npm run dorar -- bulk [--pages 2] [--dry-run]
 
-   Hadiths are read straight from dorar.net's pages. With --api <url> or DORAR_API_URL they come from a
+   bulk searches dorar.net's official API (dorar.net/article/389) for every topic in tools/dorar-topics.mjs,
+   limited to Sahih al-Bukhari and Sahih Muslim, and adds the complete sahih hadiths that fit the card.
+   search and add read dorar.net's pages directly. With --api <url> or DORAR_API_URL they come from a
    dorar-hadith-api server you run (https://github.com/AhmedElTabarani/dorar-hadith-api) instead.
    Answers are cached for a day in tools/.cache. Requests to dorar.net go one at a time with a pause between
    them; if dorar.net refuses a request the tool stops and never tries to get around a block. */
@@ -15,6 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as lib from './dorar-lib.mjs';
 import { ApiUnreachableError, chooseSource } from './dorar-sources.mjs';
+import { TOPICS } from './dorar-topics.mjs';
 
 const CARD = fileURLToPath(new URL('../index.html', import.meta.url));
 const CACHE_DIR = process.env.DORAR_CACHE_DIR || fileURLToPath(new URL('./.cache/', import.meta.url));
@@ -37,7 +41,12 @@ const HELP = `Import authentic hadiths from dorar.net into the Hadith card (inde
       --any-book  accept sahih hadiths from any book, not only the main collections
       --card <path>  use another copy of the card page
 
-  Source (both commands):
+  npm run dorar -- bulk [--pages <n>] [--dry-run]
+      Searches dorar.net's official API for each topic in tools/dorar-topics.mjs (al-Bukhari and Muslim only,
+      <n> pages of 15 results per topic, default 2) and adds every complete, vocalized sahih hadith that fits
+      the card and isn't on it yet. The API has no explanations, so these cards have no الفائدة.
+
+  Source (search and add):
       By default the tool reads dorar.net's pages directly.
       --api <url>   go through the dorar-hadith-api server at this address instead (or set DORAR_API_URL)
       --direct      read dorar.net directly even when DORAR_API_URL is set`;
@@ -50,7 +59,7 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (!arg.startsWith('--')) { args._.push(arg); continue; }
     const key = arg.slice(2);
-    if (['page', 'cat', 'card', 'api'].includes(key)) args[key] = argv[++i];
+    if (['page', 'pages', 'cat', 'card', 'api'].includes(key)) args[key] = argv[++i];
     else args[key] = true;
   }
   return args;
@@ -97,6 +106,26 @@ async function fetchPage(url) {
   }
   if (result.status === 429) throw new Error('dorar.net asked for fewer requests (HTTP 429). Wait a while before trying again.');
   throw new Error(`dorar.net answered HTTP ${result.status} for ${url}`);
+}
+
+// dorar.net's official API (dorar_api.json), with the same pacing, cache and refusal handling as its pages.
+async function fetchDorarApi(url) {
+  let result;
+  try {
+    result = await cachedGet(url, { accept: 'application/json', ext: '.json', polite: true, timeoutMs: SITE_TIMEOUT_MS });
+  } catch (err) {
+    throw new Error(`Couldn't reach dorar.net (${err.cause?.code || err.name}). Check your internet connection and try again.`);
+  }
+  if (!result.cached && !result.ok) {
+    if (result.status === 403) throw new Error('dorar.net refused the request (HTTP 403). This tool does not try to get around that: run it from a normal home connection. Pages fetched so far are cached, so a rerun continues quickly.');
+    if (result.status === 429) throw new Error('dorar.net asked for fewer requests (HTTP 429). Wait a while, then rerun; pages fetched so far are cached.');
+    throw new Error(`dorar.net answered HTTP ${result.status} for ${url}`);
+  }
+  try {
+    return JSON.parse(result.text);
+  } catch {
+    throw new lib.DorarFormatError("dorar.net's API sent something other than JSON.");
+  }
 }
 
 // dorar-hadith-api answers: { status, metadata, data } on success, { status, message } on failure.
@@ -216,7 +245,46 @@ async function add(args, source) {
   console.log(`\nAdded «${entry.id}» to ${shown.startsWith('..') ? cardPath : shown} (${list.length} hadiths). Read the matn and الفائدة once before publishing.`);
 }
 
-const COMMANDS = { search, add };
+const API_PAGE_SIZE = 15;
+
+async function bulk(args) {
+  const pages = Math.min(5, Math.max(1, Number(args.pages) || 2));
+  const cardPath = path.resolve(args.card || CARD);
+  const html = await readFile(cardPath, 'utf8');
+  const list = lib.readCardData(html);
+  const topics = Object.entries(TOPICS).flatMap(([cat, words]) => words.map((q) => ({ cat, q })));
+  const added = [];
+  const skipped = {};
+  console.log(`dorar.net official API · ${topics.length} topics · up to ${pages} page(s) each · al-Bukhari and Muslim only\n`);
+
+  for (const [i, { cat, q }] of topics.entries()) {
+    let found = 0;
+    let taken = 0;
+    for (let page = 1; page <= pages; page++) {
+      const records = lib.parseApiResult(await fetchDorarApi(lib.apiSearchUrl(q, page)));
+      found += records.length;
+      const result = lib.selectForCard(records, { cat, existing: [...list, ...added] });
+      added.push(...result.entries);
+      taken += result.entries.length;
+      for (const [reason, count] of Object.entries(result.skipped)) skipped[reason] = (skipped[reason] || 0) + count;
+      if (records.length < API_PAGE_SIZE) break;
+    }
+    console.log(`${String(i + 1).padStart(2)}/${topics.length}  ${cat.padEnd(6)}  ${q}: ${found} found, ${taken} added`);
+  }
+
+  const byCat = Object.fromEntries(lib.CATEGORY_IDS.map((c) => [c, added.filter((e) => e.cat === c).length]));
+  const narrations = added.filter((e) => e.lead === false).length;
+  console.log(`\n${added.length} new hadiths (${lib.CATEGORY_IDS.map((c) => `${c} ${byCat[c]}`).join(', ')}); ${narrations} are narrations, shown without «قال رسول الله ﷺ:».`);
+  console.log('Skipped: ' + (Object.entries(skipped).map(([reason, count]) => `${count} ${reason}`).join('; ') || 'none'));
+  if (args['dry-run']) {
+    console.log('\nDry run: index.html was not changed. First new entries:\n' + JSON.stringify(added.slice(0, 3), null, 2));
+    return;
+  }
+  await writeFile(cardPath, lib.writeCardData(html, [...list, ...added]));
+  console.log(`\nindex.html now holds ${list.length + added.length} hadiths.`);
+}
+
+const COMMANDS = { search, add, bulk };
 const args = parseArgs(process.argv.slice(2));
 const command = COMMANDS[args._[0]];
 if (!command || args.help) {
