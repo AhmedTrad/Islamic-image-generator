@@ -119,6 +119,19 @@ test('never publishes when upload or processing fails, times out or returns an u
   }
 });
 
+test('reports structured LinkedIn error codes without exposing response bodies or tokens', async () => {
+  const mock = fakeLinkedIn({ fail: () => Response.json({
+    code: 'INVALID_REQUEST', serviceErrorCode: 100, message: 'private token and response',
+  }, { status: 400 }) });
+  await assert.rejects(publish(mock), (err) => {
+    assert.match(err.message, /HTTP 400 \(INVALID_REQUEST, serviceErrorCode=100\)/);
+    assert.ok(!err.message.includes('private token'));
+    return true;
+  });
+  const unsafe = fakeLinkedIn({ fail: () => Response.json({ code: config.token, message: config.token }, { status: 400 }) });
+  await assert.rejects(publish(unsafe), (err) => !err.message.includes(config.token));
+});
+
 test('does not retry a publish request after an ambiguous network failure', async () => {
   const mock = fakeLinkedIn({ fail: (url) => {
     if (url.endsWith('/posts')) throw new TypeError('Network failure');

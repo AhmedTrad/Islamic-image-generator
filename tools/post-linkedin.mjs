@@ -49,11 +49,24 @@ export async function createImagePost({
       throw new Error(`${label}: network request failed (${err.cause?.code || err.name}). If publishing had started, check the Page before retrying; the post may already exist.`);
     }
     if (!response.ok) {
+      let details = '';
+      if (response.headers.get('content-type')?.includes('application/json')) {
+        let body;
+        try {
+          body = await response.json();
+        } catch {
+          throw new Error(`${label}: HTTP ${response.status}; LinkedIn returned an unreadable JSON error response.`);
+        }
+        const codes = [];
+        if (typeof body?.code === 'string' && /^[A-Z][A-Z0-9_]{0,99}$/.test(body.code)) codes.push(body.code);
+        if (Number.isSafeInteger(body?.serviceErrorCode)) codes.push(`serviceErrorCode=${body.serviceErrorCode}`);
+        if (codes.length) details = ` (${codes.join(', ')})`;
+      }
       const hint = response.status === 401 ? ' The token expired or was revoked; replace LINKEDIN_ACCESS_TOKEN.'
         : response.status === 403 ? ' Check Community Management API access, w_organization_social permission and the token owner\'s Page admin role.'
           : response.status === 429 ? ' LinkedIn is rate-limiting requests; retry later.'
             : response.status === 426 ? ' Set LINKEDIN_API_VERSION to a currently supported version.' : '';
-      throw new Error(`${label}: HTTP ${response.status}.${hint}`);
+      throw new Error(`${label}: HTTP ${response.status}${details}.${hint}`);
     }
     return response;
   }
