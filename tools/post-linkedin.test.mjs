@@ -100,10 +100,10 @@ test('does not send credentials or image bytes to an unexpected upload host', as
 
 test('explains expired tokens, missing permissions, throttling and retired API versions', async () => {
   for (const [status, message] of [[401, /expired/], [403, /w_organization_social/], [429, /rate-limiting/], [426, /LINKEDIN_API_VERSION/]]) {
-    const mock = fakeLinkedIn({ fail: () => new Response('private response body', { status }) });
+    const mock = fakeLinkedIn({ fail: () => new Response(config.token, { status }) });
     await assert.rejects(publish(mock), (err) => {
       assert.match(err.message, message);
-      assert.ok(!err.message.includes('private response body'));
+      assert.ok(!err.message.includes(config.token));
       return true;
     });
     assert.equal(mock.requests.length, 1);
@@ -121,11 +121,11 @@ test('never publishes when upload or processing fails, times out or returns an u
 
 test('reports structured LinkedIn error codes without exposing response bodies or tokens', async () => {
   const mock = fakeLinkedIn({ fail: () => Response.json({
-    code: 'INVALID_REQUEST', serviceErrorCode: 100, message: 'private token and response',
+    code: 'INVALID_REQUEST', serviceErrorCode: 100, message: `Invalid token ${config.token}`,
   }, { status: 400 }) });
   await assert.rejects(publish(mock), (err) => {
     assert.match(err.message, /HTTP 400 \(INVALID_REQUEST, serviceErrorCode=100\)/);
-    assert.ok(!err.message.includes('private token'));
+    assert.ok(!err.message.includes(config.token));
     return true;
   });
   const unsafe = fakeLinkedIn({ fail: () => Response.json({ code: config.token, message: config.token }, { status: 400 }) });

@@ -50,6 +50,7 @@ export async function createImagePost({
     }
     if (!response.ok) {
       let details = '';
+      let errorMessage = '';
       if (response.headers.get('content-type')?.includes('application/json')) {
         let body;
         try {
@@ -61,6 +62,15 @@ export async function createImagePost({
         if (typeof body?.code === 'string' && /^[A-Z][A-Z0-9_]{0,99}$/.test(body.code)) codes.push(body.code);
         if (Number.isSafeInteger(body?.serviceErrorCode)) codes.push(`serviceErrorCode=${body.serviceErrorCode}`);
         if (codes.length) details = ` (${codes.join(', ')})`;
+        if (typeof body?.message === 'string') errorMessage = body.message;
+      } else {
+        errorMessage = await response.text();
+      }
+      if (errorMessage) {
+        const text = errorMessage.split(config.token).join('[redacted]')
+          .replace(/https?:\/\/\S+|Bearer\s+\S+|[A-Za-z0-9_=-]{40,}/gi, '[redacted]')
+          .replace(/[\r\n\x00-\x1f\x7f]/g, ' ').slice(0, 400);
+        details += `: ${text}`;
       }
       const hint = response.status === 401 ? ' The token expired or was revoked; replace LINKEDIN_ACCESS_TOKEN.'
         : response.status === 403 ? ' Check Community Management API access, w_organization_social permission and the token owner\'s Page admin role.'

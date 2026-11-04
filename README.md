@@ -154,7 +154,7 @@ The run summary and `linkedin-post.json` artifact contain the confirmed LinkedIn
 - Before calling LinkedIn, it records a **pending** attempt. If a timeout or interrupted run leaves the result uncertain, another same-day run stops instead of risking a duplicate. Check the Page and the previous run's artifacts first. If no post exists, retry with `gh workflow run daily-linkedin.yml -f force=true`. If the post exists, leave it alone; the next day's run can proceed normally.
 - Do not delete the state branch or run with `force` unless another post is intended. Each update replaces its single-commit state, so the branch does not grow daily.
 - Missing configuration fails before rendering. HTTP 401 means renew the token; HTTP 403 means check app permissions and Page role; HTTP 426 means select a supported API version. Captions longer than 3000 characters fail instead of truncating the hadith.
-- Artifacts are retained for 14 days, including on failed posting attempts. API error bodies and access tokens are not printed.
+- Artifacts are retained for 14 days, including on failed posting attempts. API error diagnostics are limited to codes and short messages with tokens and URLs redacted.
 - GitHub schedules can start late. Public-repository schedules are disabled after 60 days without activity; re-enable them in Actions if necessary.
 
 ### Optional repository variables
