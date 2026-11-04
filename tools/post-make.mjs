@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Daily Pin through Make (make.com): Make's own Pinterest connection creates the Pin, so no Pinterest
-   developer app is needed. Run by .github/workflows/daily-pin.yml in two steps around publishing the image:
+   developer app is needed. Run manually in two steps around publishing the image:
 
      npm run pin -- prepare [--out out] [--id <hadith-id>]
          Renders the day's card to <out>/pin.png and writes the Pin's text to <out>/pin.json.

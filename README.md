@@ -1,6 +1,6 @@
 # Islamic Image Generator
 
-Daily Hadith cards from the hadith encyclopedia of [dorar.net](https://dorar.net/hadith), with a daily Pin on Pinterest.
+Daily Hadith cards from the hadith encyclopedia of [dorar.net](https://dorar.net/hadith), with a daily image post on a LinkedIn company Page.
 
 Live site: <https://ahmedtrad.github.io/Islamic-image-generator/>
 
@@ -10,13 +10,15 @@ Live site: <https://ahmedtrad.github.io/Islamic-image-generator/>
 islamic-image-generator/
 ├── index.html          # Main page: daily Hadith card and its hadith list (standalone, single file)
 ├── PRIVACY.md          # Privacy policy
-├── package.json        # Node tooling: dorar.net importer, card renderer, Pinterest poster
+├── package.json        # Node tooling: dorar.net importer, card renderer, social posting
 ├── .github/workflows/
-│   └── daily-pin.yml           # Sends the day's card to Pinterest through Make at 06:00 Paris time
+│   └── daily-linkedin.yml      # Posts the day's card to a LinkedIn Page at 06:00 Paris time
 ├── tools/
 │   ├── render-card.mjs         # Renders the card to a PNG in headless Chrome
 │   ├── check-cards.mjs         # Checks that every hadith fits the card in both formats
-│   ├── post-make.mjs           # Prepares the day's Pin and sends it to Make (run by the workflow)
+│   ├── post-linkedin.mjs       # Uploads a PNG and publishes it through LinkedIn's API
+│   ├── post-linkedin.test.mjs  # LinkedIn API request and failure tests
+│   ├── post-make.mjs           # Prepares a Pin and sends it to Make (manual use)
 │   ├── post-make.test.mjs      # Make webhook tests against a stand-in server
 │   ├── post-daily.mjs          # Pins through Pinterest's own API, for an approved API app
 │   ├── pinterest.mjs           # Pinterest API v5: tokens, duplicate check, Pin creation, Pin text
@@ -104,73 +106,72 @@ It listens on <http://localhost:5000>. Point the importer at it with `--api http
 
 The Dart package [dorar_hadith](https://pub.dev/packages/dorar_hadith) reads the same site for Dart and Flutter apps. The importer doesn't use it because it runs on Node.js.
 
-## Posting to Pinterest every day
+## Posting to LinkedIn every day
 
-[`.github/workflows/daily-pin.yml`](.github/workflows/daily-pin.yml) renders the day's card at 06:00 Paris time and sends it to [Make](https://www.make.com), which pins it to your board. Make uses its own approved Pinterest connection, so you don't need a Pinterest developer app. The Pin's description is the hadith, its reference, narrator and الفائدة. It all runs in the cloud, so your computer can be off.
+[`.github/workflows/daily-linkedin.yml`](.github/workflows/daily-linkedin.yml) replaces the Pinterest schedule. It renders a square card at **06:00 Europe/Paris** (including daylight-saving changes), uploads the PNG directly to LinkedIn, waits for processing, and publishes a public image post on your **company/organization Page**. The caption contains the hadith, reference, narrator and any الفائدة. Your computer can be off; no Make webhook or public image host is needed.
 
-Each day the workflow publishes the card on the `daily-pin` branch of this repository. That branch only ever holds the latest card, and it gives the image the public address Pinterest needs to fetch it.
+The previous "Daily Hadith Pin" Action failed because `MAKE_WEBHOOK_URL` was not configured. The LinkedIn workflow does not use that secret.
 
-`npm run render` renders the card on your own computer, into `out/`. It uses your installed Chrome or Edge.
+### 1. Authorize LinkedIn Page posting
 
-### 1. Create the Make scenario
-
-1. Sign up at [make.com](https://www.make.com). The free plan is enough: each day uses a few operations.
-2. Create a scenario. Its first module is **Webhooks → Custom webhook**. Add a webhook and copy its address.
-3. Store the address as a secret of this repository. This needs the [GitHub CLI](https://cli.github.com), signed in with `gh auth login`:
-
-   ```bash
-   gh secret set MAKE_WEBHOOK_URL
-   ```
-
-### 2. Show Make what the job sends
-
-The schedule only runs from the default branch, so merge the workflow into `main` first.
-
-1. In the webhook module, choose to redetermine the data structure, so Make waits for a sample.
-2. Run the workflow once:
+1. Create an app in the [LinkedIn Developer Portal](https://www.linkedin.com/developers/) and obtain access to the **Community Management API**. LinkedIn approval may be required; creating an app alone does not grant organization posting access.
+2. Authorize a Page administrator through LinkedIn's OAuth flow with **`w_organization_social`** permission. A token with only `w_member_social` posts to a personal profile and is not sufficient. Use an administrator account that can also upload Page-owned images.
+3. Find the Page's **numeric organization ID** in its admin URL, for example `12345678` in `https://www.linkedin.com/company/12345678/admin/`. Do not use the Page's public slug or your personal member ID.
+4. Configure this repository (or use **Settings > Secrets and variables > Actions**):
 
    ```bash
-   gh workflow run daily-pin.yml
+   gh secret set LINKEDIN_ACCESS_TOKEN
+   gh variable set LINKEDIN_ORGANIZATION_ID --body "12345678"
    ```
 
-Make then knows these fields: `title`, `description`, `alt_text`, `link`, `image_url`, plus `id` and `date`.
+   The first command prompts for the token. Never put it in source code, a repository variable, a command-line argument, or chat.
 
-### 3. Pin it
+Access tokens expire. This integration does **not** automatically refresh them: replace the secret after reauthorization when LinkedIn returns HTTP 401. Fully unattended long-term operation requires a LinkedIn-approved refresh-token setup. API versions also expire; the default is `202610`, and `LINKEDIN_API_VERSION` can select another supported `YYYYMM` version. See LinkedIn's [Images API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/images-api) and [Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api).
 
-1. Add **Pinterest → Create a Pin** after the webhook. Connect your Pinterest account and choose the board.
-2. Map the webhook's `title`, `description`, `link` and `alt_text` to the Pin fields with the same names. Map `image_url` to the Pin's image address.
-3. Optional: add **Webhooks → Webhook response** after it, with the body `{"id": "…"}` holding the new Pin's id. The job's log then shows each Pin's address. Without it, Make answers "Accepted" and the job can't confirm the Pin.
-4. Save the scenario and switch it on, set to run as soon as data arrives.
+### 2. Deploy and test
 
-The sample run counted as today's post, so send today's card again:
+Commit and push these changes to `main` to replace the old schedule; local edits do not change GitHub Actions. Scheduled workflows only run from the default branch. Allow Actions **read and write** repository contents permissions and allow the workflow to create/update the `daily-linkedin` state branch.
+
+First render without posting or requiring any LinkedIn credentials:
 
 ```bash
-gh workflow run daily-pin.yml -f force=true
+npm run linkedin -- --dry-run
+# Or, after pushing:
+gh workflow run daily-linkedin.yml -f dry_run=true
 ```
 
-### Optional settings
+Inspect the PNG and caption in `out/` locally or in the run's **hadith-linkedin** artifact. Then publish:
 
-Set these as repository variables with `gh variable set <name> --body "<value>"`.
+```bash
+gh workflow run daily-linkedin.yml
+```
+
+The run summary and `linkedin-post.json` artifact contain the confirmed LinkedIn post URL. A local `npm run linkedin` also renders and publishes, but **does not use the workflow's duplicate guard**; prefer the workflow for daily posting. Local rendering requires Chrome or Edge and Node.js 22.12 or newer.
+
+### Duplicate protection and failures
+
+- The workflow saves the date and Page ID on the `daily-linkedin` branch, so another run on the same day skips an already confirmed post.
+- Before calling LinkedIn, it records a **pending** attempt. If a timeout or interrupted run leaves the result uncertain, another same-day run stops instead of risking a duplicate. Check the Page and the previous run's artifacts first. If no post exists, retry with `gh workflow run daily-linkedin.yml -f force=true`. If the post exists, leave it alone; the next day's run can proceed normally.
+- Do not delete the state branch or run with `force` unless another post is intended. Each update replaces its single-commit state, so the branch does not grow daily.
+- Missing configuration fails before rendering. HTTP 401 means renew the token; HTTP 403 means check app permissions and Page role; HTTP 426 means select a supported API version. Captions longer than 3000 characters fail instead of truncating the hadith.
+- Artifacts are retained for 14 days, including on failed posting attempts. API error bodies and access tokens are not printed.
+- GitHub schedules can start late. Public-repository schedules are disabled after 60 days without activity; re-enable them in Actions if necessary.
+
+### Optional repository variables
+
+Set these with `gh variable set <name> --body "<value>"`.
 
 | Variable | Effect |
 | --- | --- |
-| `PIN_LINK` | Address the Pin links to. The hadith id is added as `#id`. |
-| `CAPTION_FOOTER` | Text after the description, such as hashtags. |
+| `LINKEDIN_API_VERSION` | Supported LinkedIn API version; default `202610`. |
+| `CAPTION_FOOTER` | Text after the caption, such as hashtags; keep the whole caption within 3000 characters. |
 | `CARD_CREDIT` | Replaces the credit line at the bottom of the card. |
-| `CARD_SHOW_DATE` | `true` prints the Hijri date on the card. It is left off by default because a Pin keeps circulating for months. |
+| `CARD_SHOW_DATE` | `true` prints the Hijri date; off by default. |
+| `CARD_FORMAT` | `square` (default, 1080 x 1080) or `landscape` (1200 x 900). |
 
-### Good to know
+### Manual Pinterest posting
 
-- A second run on the same day doesn't send the same card twice. Run the workflow with `force` to send it again.
-- Each run keeps the card and the Pin text for 14 days as an artifact.
-- If Make answers "Accepted" but no Pin appears, the scenario is probably off. Make queues the data until you switch it on. Check the scenario's history in Make.
-- GitHub can start scheduled runs a few minutes late when it is busy.
-- GitHub turns off scheduled workflows in a public repository after 60 days without activity. It emails you first, and you can turn it back on from the Actions tab.
-- The card holds 881 hadiths, so the daily Pin doesn't repeat for about two and a half years. Add more with `npm run dorar`.
-
-### Posting through Pinterest's API instead
-
-If Pinterest later approves a developer app, `npm run pinterest:auth` signs in once and `npm run post` pins through Pinterest's API directly. The settings are listed at the top of [tools/post-daily.mjs](tools/post-daily.mjs). The workflow would then need to call that script instead of the Make steps.
+The Pinterest tools remain available, but are no longer scheduled. For an approved Pinterest API app, `npm run pinterest:auth` signs in and `npm run post` publishes; settings are listed at the top of [tools/post-daily.mjs](tools/post-daily.mjs). For Make, [tools/post-make.mjs](tools/post-make.mjs) provides `prepare` and `send` commands; configure `MAKE_WEBHOOK_URL`, publish the PNG to an HTTPS address, and connect the webhook to Pinterest's "Create a Pin" module yourself.
 
 ## Running the App
 

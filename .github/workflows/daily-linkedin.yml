@@ -1,0 +1,132 @@
+name: Daily Hadith LinkedIn
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+      timezone: Europe/Paris
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Render only, without posting or requiring LinkedIn credentials
+        type: boolean
+        default: false
+      force:
+        description: Post again (check the Page first if an earlier run failed)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-linkedin
+  cancel-in-progress: false
+
+env:
+  CARD_TIMEZONE: Europe/Paris
+  STATE_BRANCH: daily-linkedin
+  LINKEDIN_ORGANIZATION_ID: ${{ vars.LINKEDIN_ORGANIZATION_ID }}
+  LINKEDIN_API_VERSION: ${{ vars.LINKEDIN_API_VERSION }}
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate LinkedIn configuration before rendering
+        if: inputs.dry_run != true
+        run: npm run linkedin -- --check-config
+        env:
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+
+      - name: Check today's posting state
+        id: guard
+        if: inputs.dry_run != true
+        env:
+          FORCE: ${{ inputs.force }}
+        shell: bash
+        run: |
+          key="$(TZ="$CARD_TIMEZONE" date +%F) $LINKEDIN_ORGANIZATION_ID"
+          remote=$(git ls-remote --heads origin "refs/heads/$STATE_BRANCH")
+          if [ -n "$remote" ]; then
+            git fetch --quiet --depth=1 origin "$STATE_BRANCH"
+            state=$(git show FETCH_HEAD:state.txt)
+            pattern='^(pending|sent) [0-9]{4}-[0-9]{2}-[0-9]{2} [1-9][0-9]*$'
+            if ! [[ "$state" =~ $pattern ]]; then
+              echo "::error::Invalid LinkedIn posting state. Inspect the state branch before retrying."
+              exit 1
+            fi
+            if [ "$FORCE" != "true" ]; then
+              if [ "$state" = "sent $key" ]; then
+                echo "Today's card was already posted to this Page." | tee -a "$GITHUB_STEP_SUMMARY"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+              elif [ "$state" = "pending $key" ]; then
+                echo "::error::An earlier attempt may have posted today's card. Check the LinkedIn Page, then use force only if another post is needed."
+                exit 1
+              fi
+            fi
+          fi
+
+      - run: npm ci
+        if: steps.guard.outputs.skip != 'true'
+
+      - name: Render today's card
+        id: card
+        if: steps.guard.outputs.skip != 'true'
+        run: npm run linkedin -- --dry-run --out out
+        env:
+          CARD_CREDIT: ${{ vars.CARD_CREDIT }}
+          CARD_SHOW_DATE: ${{ vars.CARD_SHOW_DATE }}
+          CARD_FORMAT: ${{ vars.CARD_FORMAT }}
+          CAPTION_FOOTER: ${{ vars.CAPTION_FOOTER }}
+
+      # Persist the attempt before calling LinkedIn, so an ambiguous failure cannot cause an automatic duplicate.
+      - name: Record pending attempt
+        if: steps.guard.outputs.skip != 'true' && inputs.dry_run != true
+        env:
+          DATE: ${{ steps.card.outputs.date }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          blob=$(printf 'pending %s %s\n' "$DATE" "$LINKEDIN_ORGANIZATION_ID" | git hash-object -w --stdin)
+          tree=$(printf '100644 blob %s\tstate.txt\n' "$blob" | git mktree)
+          commit=$(git commit-tree "$tree" -m "Pending LinkedIn card for $DATE")
+          git push --force --quiet origin "$commit:refs/heads/$STATE_BRANCH"
+
+      - name: Upload image and publish to LinkedIn Page
+        if: steps.guard.outputs.skip != 'true' && inputs.dry_run != true
+        run: npm run linkedin -- --send-only --out out
+        env:
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+
+      - name: Save confirmed posting receipt
+        if: steps.guard.outputs.skip != 'true' && inputs.dry_run != true
+        env:
+          DATE: ${{ steps.card.outputs.date }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          state=$(printf 'sent %s %s\n' "$DATE" "$LINKEDIN_ORGANIZATION_ID" | git hash-object -w --stdin)
+          receipt=$(git hash-object -w out/linkedin-post.json)
+          tree=$(printf '100644 blob %s\tstate.txt\n100644 blob %s\tpost.json\n' "$state" "$receipt" | git mktree)
+          commit=$(git commit-tree "$tree" -m "Posted LinkedIn card for $DATE")
+          git push --force --quiet origin "$commit:refs/heads/$STATE_BRANCH"
+
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.guard.outputs.skip != 'true'
+        with:
+          name: hadith-linkedin-${{ github.run_id }}
+          path: out/linkedin-*
+          retention-days: 14
+          if-no-files-found: ignore

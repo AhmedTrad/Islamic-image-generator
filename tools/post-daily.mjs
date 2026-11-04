@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Render the day's Hadith card and pin it to a Pinterest board. Run daily by .github/workflows/daily-pin.yml.
+/* Render the day's Hadith card and pin it to a Pinterest board manually.
 
      npm run post -- [--dry-run] [--force] [--id <hadith-id>] [--out <dir>]
 
@@ -65,7 +65,7 @@ function checkConfig(config) {
       if (!config[key]) missing.push({ appId: 'PINTEREST_APP_ID', appSecret: 'PINTEREST_APP_SECRET', refreshToken: 'PINTEREST_REFRESH_TOKEN' }[key]);
     }
   }
-  if (missing.length) throw new Error(`Missing settings: ${missing.join(', ')}. See «Posting to Pinterest every day» in the README.`);
+  if (missing.length) throw new Error(`Missing settings: ${missing.join(', ')}. See «Manual Pinterest posting» in the README.`);
 }
 
 async function main() {
